@@ -1,0 +1,162 @@
+{
+  "projectType": "saas",
+  "projectName": "Copr",
+  "projectDescription": "A build system for creating custom RPM repositories with web UI, API, and CLI tools",
+  "theme": "aspen",
+  "primaryColor": "#51A2DA",
+  "lightColor": "#3C6EB4",
+  "darkColor": "#294172",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "User Guide",
+            "pages": [
+              "user-guide/creating-projects",
+              "user-guide/building-packages",
+              "user-guide/build-sources",
+              "user-guide/managing-repositories",
+              "user-guide/enabling-repositories",
+              "user-guide/webhooks"
+            ]
+          },
+          {
+            "group": "CLI Tool",
+            "pages": [
+              "cli/installation",
+              "cli/configuration",
+              "cli/commands",
+              "cli/examples"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/custom-source-methods",
+              "advanced/module-builds",
+              "advanced/permissions",
+              "advanced/chroot-management"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/projects",
+              "api/builds",
+              "api/packages",
+              "api/build-chroots",
+              "api/project-chroots",
+              "api/mock-chroots",
+              "api/permissions",
+              "api/webhooks"
+            ]
+          },
+          {
+            "group": "Python Client",
+            "pages": [
+              "api/python-client",
+              "api/client-examples"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "development/architecture",
+              "development/contributing",
+              "development/local-setup"
+            ]
+          },
+          {
+            "group": "Components",
+            "pages": [
+              "development/frontend",
+              "development/backend",
+              "development/distgit",
+              "development/builder",
+              "development/keygen"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "development/deployment",
+              "development/maintenance",
+              "development/release-process"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Build RPM packages from multiple sources (SRPM, Git, PyPI, RubyGems, custom scripts)",
+    "Multi-chroot support for various distributions (Fedora, CentOS, RHEL, openSUSE, Mageia)",
+    "Web UI for project and build management",
+    "RESTful API v3 for automation and integration",
+    "Command-line tool (copr-cli) for scripting",
+    "Automatic GPG signing of packages",
+    "Webhook integration with GitHub, GitLab, and Pagure",
+    "Module builds support",
+    "Custom repository management",
+    "Build monitoring and status tracking"
+  ],
+  "publicApiSurface": [
+    "GET /api_3/project",
+    "POST /api_3/project/add",
+    "POST /api_3/project/edit/{ownername}/{projectname}",
+    "DELETE /api_3/project/delete/{ownername}/{projectname}",
+    "GET /api_3/build",
+    "POST /api_3/build/create/url",
+    "POST /api_3/build/create/upload",
+    "POST /api_3/build/create/scm",
+    "POST /api_3/build/create/pypi",
+    "POST /api_3/build/create/rubygems",
+    "POST /api_3/build/create/custom",
+    "GET /api_3/build/{build_id}",
+    "POST /api_3/build/cancel/{build_id}",
+    "GET /api_3/package",
+    "POST /api_3/package/add/{ownername}/{projectname}",
+    "GET /api_3/mock-chroot/list",
+    "GET /api_3/project-chroot",
+    "POST /api_3/webhook/github/{ownername}/{projectname}/{uuid}",
+    "copr-cli create",
+    "copr-cli build",
+    "copr-cli edit-chroot",
+    "copr-cli list",
+    "copr-cli status",
+    "copr-cli cancel",
+    "copr-cli delete",
+    "copr-cli fork",
+    "copr-cli add-package-scm",
+    "copr-cli build-package",
+    "copr-cli enable-project",
+    "copr-cli monitor"
+  ]
+}
