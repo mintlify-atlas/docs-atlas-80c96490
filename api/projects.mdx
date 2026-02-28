@@ -1,0 +1,418 @@
+---
+title: Project Endpoints
+description: CRUD operations for Copr projects
+---
+
+## Get Project
+
+<CodeGroup>
+```bash GET /api_3/project/
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/project/?ownername=@copr&projectname=copr-dev"
+```
+</CodeGroup>
+
+Get details for a single Copr project according to ownername and projectname.
+
+### Query Parameters
+
+<ParamField query="ownername" type="string" required>
+  Owner of the project (username or @groupname)
+</ParamField>
+
+<ParamField query="projectname" type="string" required>
+  Name of the project
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="integer">
+  Unique project identifier
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Project name
+</ResponseField>
+
+<ResponseField name="ownername" type="string">
+  Owner name (user or group)
+</ResponseField>
+
+<ResponseField name="full_name" type="string">
+  Full project name in format ownername/projectname
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Project description
+</ResponseField>
+
+<ResponseField name="instructions" type="string">
+  Installation instructions
+</ResponseField>
+
+<ResponseField name="homepage" type="string">
+  Project homepage URL
+</ResponseField>
+
+<ResponseField name="contact" type="string">
+  Contact information
+</ResponseField>
+
+<ResponseField name="persistent" type="boolean">
+  Whether the project is persistent (not auto-pruned)
+</ResponseField>
+
+<ResponseField name="auto_prune" type="boolean">
+  Whether old builds are automatically pruned
+</ResponseField>
+
+<ResponseField name="enable_net" type="boolean">
+  Whether network access is enabled during builds
+</ResponseField>
+
+<ResponseField name="bootstrap" type="string">
+  Bootstrap container configuration ("on", "off", "image")
+</ResponseField>
+
+<ResponseField name="isolation" type="string">
+  Build isolation mode
+</ResponseField>
+
+<ResponseField name="additional_repos" type="array">
+  List of additional repository URLs
+</ResponseField>
+
+<ResponseField name="chroot_repos" type="object">
+  Repository URLs for each enabled chroot
+</ResponseField>
+
+---
+
+## List Projects
+
+<CodeGroup>
+```bash GET /api_3/project/list
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/project/list?ownername=@copr&limit=10"
+```
+</CodeGroup>
+
+Get details for multiple Copr projects according to ownername with pagination support.
+
+### Query Parameters
+
+<ParamField query="ownername" type="string">
+  Filter projects by owner name
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Number of items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+<ParamField query="order" type="string" default="id">
+  Field to order by
+</ParamField>
+
+<ParamField query="order_type" type="string" default="ASC">
+  Order direction (ASC or DESC)
+</ParamField>
+
+### Response
+
+<ResponseField name="items" type="array">
+  Array of project objects (same structure as Get Project)
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Pagination metadata
+  <Expandable title="properties">
+    <ResponseField name="limit" type="integer">
+      Items per page
+    </ResponseField>
+    <ResponseField name="offset" type="integer">
+      Number of items skipped
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Search Projects
+
+<CodeGroup>
+```bash GET /api_3/project/search
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/project/search?query=python"
+```
+</CodeGroup>
+
+Search for projects using a fulltext search query.
+
+### Query Parameters
+
+<ParamField query="query" type="string" required>
+  Search query string
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Number of items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+### Response
+
+Same structure as List Projects response.
+
+---
+
+## Create Project
+
+<CodeGroup>
+```bash POST /api_3/project/add/<ownername>
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/project/add/myuser" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-project",
+    "chroots": ["fedora-40-x86_64", "fedora-39-x86_64"],
+    "description": "My awesome project",
+    "instructions": "dnf copr enable myuser/my-project"
+  }'
+```
+</CodeGroup>
+
+Create a new Copr project. Requires authentication.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Owner name (username or @groupname for group projects)
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="exist_ok" type="boolean" default="False">
+  If True, return existing project instead of raising error if project already exists
+</ParamField>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Project name (must be unique for the owner)
+</ParamField>
+
+<ParamField body="chroots" type="array" required>
+  List of mock chroot names to enable
+</ParamField>
+
+<ParamField body="description" type="string">
+  Project description
+</ParamField>
+
+<ParamField body="instructions" type="string">
+  Installation instructions for end users
+</ParamField>
+
+<ParamField body="homepage" type="string">
+  Project homepage URL
+</ParamField>
+
+<ParamField body="contact" type="string">
+  Contact information
+</ParamField>
+
+<ParamField body="additional_repos" type="array">
+  Additional repository URLs (space-separated or array)
+</ParamField>
+
+<ParamField body="enable_net" type="boolean" default="false">
+  Enable network access during builds
+</ParamField>
+
+<ParamField body="persistent" type="boolean" default="false">
+  Make project persistent (requires admin privileges)
+</ParamField>
+
+<ParamField body="auto_prune" type="boolean" default="true">
+  Automatically prune old builds
+</ParamField>
+
+<ParamField body="unlisted_on_hp" type="boolean" default="false">
+  Hide project from homepage listing
+</ParamField>
+
+<ParamField body="bootstrap" type="string">
+  Bootstrap container mode: "on", "off", "image", or "default"
+</ParamField>
+
+<ParamField body="isolation" type="string">
+  Build isolation mode: "default", "simple", or "nspawn"
+</ParamField>
+
+<ParamField body="module_hotfixes" type="boolean" default="false">
+  Enable module hotfixes
+</ParamField>
+
+<ParamField body="appstream" type="boolean" default="false">
+  Enable AppStream metadata generation
+</ParamField>
+
+<ParamField body="follow_fedora_branching" type="boolean" default="false">
+  Automatically enable new Fedora releases
+</ParamField>
+
+<ParamField body="repo_priority" type="integer">
+  Repository priority value
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="integer">
+  Created project ID
+</ResponseField>
+
+Returns the created project object with 200 status code, or 400 for validation errors.
+
+---
+
+## Edit Project
+
+<CodeGroup>
+```bash PUT /api_3/project/edit/<ownername>/<projectname>
+curl -X PUT \
+  "https://copr.fedorainfracloud.org/api_3/project/edit/myuser/my-project" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Updated description",
+    "enable_net": true
+  }'
+```
+</CodeGroup>
+
+Edit an existing Copr project. Requires authentication and edit permissions.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+### Request Body
+
+Accepts the same fields as Create Project. Only provided fields will be updated.
+
+### Response
+
+Returns the updated project object with 200 status code.
+
+---
+
+## Fork Project
+
+<CodeGroup>
+```bash POST /api_3/project/fork/<ownername>/<projectname>
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/project/fork/@copr/copr-dev" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-copr-fork",
+    "ownername": "myuser",
+    "confirm": true
+  }'
+```
+</CodeGroup>
+
+Fork an existing Copr project into your namespace or a group. Requires authentication.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Source project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Source project name
+</ParamField>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Name for the forked project
+</ParamField>
+
+<ParamField body="ownername" type="string" required>
+  Destination owner (your username or a group you belong to)
+</ParamField>
+
+<ParamField body="confirm" type="boolean" default="false">
+  Confirm overwriting if destination project already exists
+</ParamField>
+
+### Response
+
+Returns the forked project object with 200 status code.
+
+---
+
+## Delete Project
+
+<CodeGroup>
+```bash DELETE /api_3/project/delete/<ownername>/<projectname>
+curl -X DELETE \
+  "https://copr.fedorainfracloud.org/api_3/project/delete/myuser/my-project"
+```
+</CodeGroup>
+
+Delete a Copr project permanently. Requires authentication and admin permissions.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+### Response
+
+Returns the deleted project object with 200 status code.
+
+---
+
+## Regenerate Repository Metadata
+
+<CodeGroup>
+```bash PUT /api_3/project/regenerate-repos/<ownername>/<projectname>
+curl -X PUT \
+  "https://copr.fedorainfracloud.org/api_3/project/regenerate-repos/myuser/my-project"
+```
+</CodeGroup>
+
+Regenerate all repository metadata for a Copr project. Useful after manual repository modifications.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+### Response
+
+Returns the project object with 200 status code.

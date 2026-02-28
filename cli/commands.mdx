@@ -1,0 +1,1058 @@
+---
+title: Commands Reference
+description: Complete reference for all copr-cli commands, flags, and options
+---
+
+## Global Options
+
+These options can be used with any command:
+
+<ParamField path="--help" type="flag">
+  Show help message and exit
+</ParamField>
+
+<ParamField path="--version" type="flag">
+  Show program version number and exit
+</ParamField>
+
+<ParamField path="--config" type="path">
+  Path to alternative configuration file (default: `~/.config/copr`)
+  
+  ```bash
+  copr-cli --config ~/.config/copr-custom list
+  ```
+</ParamField>
+
+<ParamField path="--debug" type="flag">
+  Enable debug output for troubleshooting
+  
+  ```bash
+  copr-cli --debug build myproject package.rpm
+  ```
+</ParamField>
+
+<ParamField path="--no-color" type="flag">
+  Disable colored output
+  
+  ```bash
+  copr-cli --no-color status 12345
+  ```
+</ParamField>
+
+## Authentication Commands
+
+### whoami
+
+Print the username that the client authenticates with.
+
+```bash
+copr-cli whoami
+```
+
+### new-api-token
+
+Generate a new API token and update the configuration file.
+
+```bash
+copr-cli new-api-token
+```
+
+<Warning>
+This destroys your old token! Any other applications using the old token will stop working.
+</Warning>
+
+### new-webhook-secret
+
+Regenerate webhook secret for a project.
+
+```bash
+copr-cli new-webhook-secret username/project
+```
+
+## Project Management
+
+### list
+
+List all projects of a user or group.
+
+```bash
+copr-cli list [username|@groupname]
+```
+
+<ParamField path="username|@groupname" type="string" optional>
+  Username or @groupname to list projects for. If omitted, lists your own projects.
+</ParamField>
+
+Example:
+```bash
+# List your own projects
+copr-cli list
+
+# List another user's projects
+copr-cli list john
+
+# List group projects
+copr-cli list @somegroup
+```
+
+### create
+
+Create a new project.
+
+```bash
+copr-cli create PROJECT_NAME [OPTIONS]
+```
+
+#### Required Parameters
+
+<ParamField path="name" type="string" required>
+  The name of the project to create. Can be just the name (creates in your namespace) or `username/project` or `@groupname/project`.
+</ParamField>
+
+<ParamField path="--chroot" type="string" required>
+  Chroot to enable for this project. Can be specified multiple times. At least one is required.
+  
+  ```bash
+  copr-cli create myproject \
+    --chroot fedora-39-x86_64 \
+    --chroot fedora-40-x86_64
+  ```
+</ParamField>
+
+#### Optional Parameters
+
+<ParamField path="--description" type="string">
+  Description of the project
+</ParamField>
+
+<ParamField path="--instructions" type="string">
+  Installation instructions for users
+</ParamField>
+
+<ParamField path="--repo" type="url">
+  Additional repository to enable during builds. Can be specified multiple times.
+  
+  ```bash
+  --repo https://example.com/repo1 \
+  --repo https://example.com/repo2
+  ```
+</ParamField>
+
+<ParamField path="--runtime-repo-dependency" type="url">
+  Repository that will be automatically enabled when users enable this project. Can be specified multiple times.
+</ParamField>
+
+<ParamField path="--disable_createrepo" type="boolean">
+  Disable automatic repository metadata generation (values: `true`/`false`)
+</ParamField>
+
+<ParamField path="--enable-net" type="enum">
+  Enable networking for builds in this project
+  
+  Options: `on`, `off` (default: `off`)
+</ParamField>
+
+<ParamField path="--unlisted-on-hp" type="enum">
+  Hide project from Copr home page
+  
+  Options: `on`, `off`
+</ParamField>
+
+<ParamField path="--persistent" type="flag">
+  Make project and builds undeletable (admin only)
+</ParamField>
+
+<ParamField path="--auto-prune" type="enum">
+  Enable automatic deletion of obsolete builds
+  
+  Options: `on` (default), `off` (admin only)
+</ParamField>
+
+<ParamField path="--isolation" type="enum">
+  Build isolation method
+  
+  Options: `simple`, `nspawn`, `default` (default: `default`)
+</ParamField>
+
+<ParamField path="--bootstrap" type="enum">
+  Configure Mock's bootstrap feature
+  
+  Options:
+  - `default` - Use pre-configured setup from mock-core-configs
+  - `on` - Enable bootstrap
+  - `off` - Disable bootstrap
+  - `image` - Use container image for bootstrap
+</ParamField>
+
+<ParamField path="--delete-after-days" type="integer">
+  Automatically delete project after specified days
+</ParamField>
+
+<ParamField path="--multilib" type="enum">
+  Allow 32-bit packages on 64-bit architectures
+  
+  Options: `on`, `off` (default: `off`)
+</ParamField>
+
+<ParamField path="--module-hotfixes" type="enum">
+  Allow packages to override module streams
+  
+  Options: `on`, `off` (default: `off`)
+</ParamField>
+
+<ParamField path="--fedora-review" type="flag">
+  Run fedora-review tool on builds (doesn't fail build if review fails)
+</ParamField>
+
+<ParamField path="--appstream" type="enum">
+  Generate AppStream metadata
+  
+  Options: `on`, `off` (default: `off`)
+</ParamField>
+
+<ParamField path="--follow-fedora-branching" type="enum">
+  Auto-create chroots for new Fedora branches
+  
+  Options: `on` (default), `off`
+</ParamField>
+
+<ParamField path="--repo-priority" type="integer">
+  Set DNF priority for this repository (see `man dnf.conf`)
+</ParamField>
+
+<ParamField path="--storage" type="enum">
+  Storage backend for this project (admin only)
+  
+  Options: `backend`, `pulp`
+</ParamField>
+
+<ParamField path="--packit-forge-project-allowed" type="string">
+  Forge project allowed to build via Packit (format: `github.com/org/repo`). Supports wildcards. Can be specified multiple times.
+  
+  ```bash
+  --packit-forge-project-allowed github.com/myorg/*
+  ```
+</ParamField>
+
+Example:
+```bash
+copr-cli create myproject \
+  --chroot fedora-39-x86_64 \
+  --chroot fedora-40-x86_64 \
+  --description "My test project" \
+  --instructions "dnf copr enable user/myproject" \
+  --enable-net off
+```
+
+### modify
+
+Modify an existing project. Accepts the same options as `create` (except `--persistent` and `--storage`).
+
+```bash
+copr-cli modify PROJECT_NAME [OPTIONS]
+```
+
+Example:
+```bash
+copr-cli modify myproject \
+  --description "Updated description" \
+  --enable-net on
+```
+
+### get
+
+Get detailed information about a project.
+
+```bash
+copr-cli get PROJECT
+```
+
+Example:
+```bash
+copr-cli get myproject
+copr-cli get username/project
+```
+
+### delete
+
+Delete an entire project and all its builds.
+
+```bash
+copr-cli delete PROJECT
+```
+
+<Warning>
+This action cannot be undone! All builds and packages will be permanently deleted.
+</Warning>
+
+Example:
+```bash
+copr-cli delete myproject
+```
+
+### fork
+
+Fork a project and all its packages.
+
+```bash
+copr-cli fork SOURCE_PROJECT DESTINATION_PROJECT [--confirm]
+```
+
+<ParamField path="src" type="string" required>
+  Source project to fork (format: `owner/project`)
+</ParamField>
+
+<ParamField path="dst" type="string" required>
+  Destination project name (format: `owner/project`)
+</ParamField>
+
+<ParamField path="--confirm" type="flag">
+  Confirm forking into an existing project
+</ParamField>
+
+Example:
+```bash
+# Fork another user's project
+copr-cli fork username/project myproject
+
+# Update existing fork
+copr-cli fork username/project myproject --confirm
+```
+
+### regenerate-repos
+
+Manually regenerate repository metadata.
+
+```bash
+copr-cli regenerate-repos PROJECT
+```
+
+Example:
+```bash
+copr-cli regenerate-repos myproject
+```
+
+## Build Commands
+
+### build
+
+Build packages from SRPM files or URLs.
+
+```bash
+copr-cli build PROJECT PKG [PKG ...] [OPTIONS]
+```
+
+<ParamField path="copr_repo" type="string" required>
+  Project to build in. Format: `project`, `owner/project`, or `@group/project`. Can also use `project:tag` for side repositories.
+</ParamField>
+
+<ParamField path="pkgs" type="string" required>
+  One or more SRPM files (local paths or URLs)
+</ParamField>
+
+#### Build Options
+
+<ParamField path="-r, --chroot" type="string">
+  Build only for specific chroot(s). Can be specified multiple times.
+</ParamField>
+
+<ParamField path="--exclude-chroot" type="string">
+  Exclude specific chroot(s). Can be specified multiple times.
+</ParamField>
+
+<ParamField path="--timeout" type="integer">
+  Build timeout in seconds (default: 18000 = 5 hours)
+</ParamField>
+
+<ParamField path="--nowait" type="flag">
+  Don't wait for build completion
+</ParamField>
+
+<ParamField path="--background" type="flag">
+  Run build at lower priority
+</ParamField>
+
+<ParamField path="--isolation" type="enum">
+  Isolation method: `simple`, `nspawn`, `default`, `unchanged` (default: `unchanged`)
+</ParamField>
+
+<ParamField path="--enable-net" type="enum">
+  Enable networking: `on`, `off`
+</ParamField>
+
+<ParamField path="--bootstrap" type="enum">
+  Bootstrap mode: `unchanged`, `default`, `on`, `off`, `image` (default: `unchanged`)
+</ParamField>
+
+<ParamField path="--after-build-id" type="integer">
+  Build after the specified build ID completes
+</ParamField>
+
+<ParamField path="--with-build-id" type="integer">
+  Build in the same batch as the specified build ID
+</ParamField>
+
+Example:
+```bash
+# Build from local SRPM
+copr-cli build myproject package.src.rpm
+
+# Build from URL
+copr-cli build myproject https://example.com/package.src.rpm
+
+# Build for specific chroots
+copr-cli build myproject package.src.rpm \
+  -r fedora-39-x86_64 \
+  -r fedora-40-x86_64
+
+# Build in side repository
+copr-cli build myproject:testing package.src.rpm
+```
+
+### buildscm
+
+Build from a Git/SVN repository.
+
+```bash
+copr-cli buildscm PROJECT --clone-url URL [OPTIONS]
+```
+
+<ParamField path="--clone-url" type="url" required>
+  Git or SVN repository URL
+</ParamField>
+
+<ParamField path="--commit" type="string">
+  Branch name, tag name, or git hash
+</ParamField>
+
+<ParamField path="--subdir" type="string">
+  Subdirectory containing the package
+</ParamField>
+
+<ParamField path="--spec" type="string">
+  Path to .spec file relative to subdirectory
+</ParamField>
+
+<ParamField path="--type" type="enum">
+  Version control system: `git` (default), `svn`
+</ParamField>
+
+<ParamField path="--method" type="enum">
+  SRPM build method: `rpkg` (default), `tito`, `tito_test`, `make_srpm`
+</ParamField>
+
+Example:
+```bash
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo \
+  --commit main \
+  --subdir rpm \
+  --spec mypackage.spec \
+  --method tito
+```
+
+### buildpypi
+
+Build a Python package from PyPI.
+
+```bash
+copr-cli buildpypi PROJECT --packagename NAME [OPTIONS]
+```
+
+<ParamField path="--packagename" type="string" required>
+  Name of the PyPI package
+</ParamField>
+
+<ParamField path="--packageversion" type="string">
+  Specific version to build (default: latest)
+</ParamField>
+
+<ParamField path="--pythonversions" type="integer[]">
+  Python versions to build for (default: 3 2)
+  
+  ```bash
+  --pythonversions 3 2
+  ```
+</ParamField>
+
+<ParamField path="--spec-generator" type="enum">
+  Tool for generating spec file: `pyp2rpm`, `pyp2spec` (default: `pyp2spec`)
+</ParamField>
+
+<ParamField path="--template" type="path">
+  Custom spec template file
+</ParamField>
+
+Example:
+```bash
+copr-cli buildpypi myproject --packagename requests
+copr-cli buildpypi myproject --packagename flask --packageversion 2.0.1
+```
+
+### buildgem
+
+Build a Ruby gem from rubygems.org.
+
+```bash
+copr-cli buildgem PROJECT --gem NAME
+```
+
+Example:
+```bash
+copr-cli buildgem myproject --gem rails
+```
+
+### build-distgit
+
+Build from a DistGit repository.
+
+```bash
+copr-cli build-distgit PROJECT --name PACKAGE [OPTIONS]
+```
+
+<ParamField path="--name" type="string" required>
+  Package name in DistGit
+</ParamField>
+
+<ParamField path="--distgit" type="string">
+  DistGit instance (e.g., `fedora`)
+</ParamField>
+
+<ParamField path="--commit" type="string">
+  Branch, tag, or commit hash
+</ParamField>
+
+<ParamField path="--namespace" type="string">
+  DistGit namespace (e.g., `@copr/copr`)
+</ParamField>
+
+Example:
+```bash
+copr-cli build-distgit myproject \
+  --name copr-cli \
+  --distgit fedora \
+  --commit f39
+```
+
+### buildcustom
+
+Build using a custom script.
+
+```bash
+copr-cli buildcustom PROJECT --script FILE [OPTIONS]
+```
+
+<ParamField path="--script" type="path" required>
+  Script file to generate sources
+</ParamField>
+
+<ParamField path="--script-chroot" type="string">
+  Mock chroot to run script in
+</ParamField>
+
+<ParamField path="--script-builddeps" type="string">
+  Space-separated list of build dependencies
+</ParamField>
+
+<ParamField path="--script-resultdir" type="string">
+  Directory where script outputs results (default: `.`)
+</ParamField>
+
+<ParamField path="--script-repos" type="string">
+  Space-separated list of additional repository URLs
+</ParamField>
+
+### status
+
+Get build status by build ID.
+
+```bash
+copr-cli status BUILD_ID
+```
+
+Example:
+```bash
+copr-cli status 12345
+```
+
+Output:
+```
+succeeded
+```
+
+### cancel
+
+Cancel a running build.
+
+```bash
+copr-cli cancel BUILD_ID
+```
+
+Example:
+```bash
+copr-cli cancel 12345
+```
+
+### watch-build
+
+Watch build progress in real-time.
+
+```bash
+copr-cli watch-build BUILD_ID [BUILD_ID ...]
+```
+
+Example:
+```bash
+copr-cli watch-build 12345
+copr-cli watch-build 12345 12346 12347
+```
+
+### delete-build
+
+Delete one or more builds.
+
+```bash
+copr-cli delete-build BUILD_ID [BUILD_ID ...]
+```
+
+Example:
+```bash
+copr-cli delete-build 12345
+copr-cli delete-build 12345 12346 12347
+```
+
+### download-build
+
+Download build artifacts.
+
+```bash
+copr-cli download-build BUILD_ID [OPTIONS]
+```
+
+<ParamField path="-d, --dest" type="path">
+  Destination directory (default: `.`)
+</ParamField>
+
+<ParamField path="-r, --chroot" type="string">
+  Download only specific chroot(s). Can be specified multiple times.
+</ParamField>
+
+<ParamField path="--rpms" type="flag">
+  Download only RPM files
+</ParamField>
+
+<ParamField path="--spec" type="flag">
+  Download only .spec file
+</ParamField>
+
+<ParamField path="--logs" type="flag">
+  Download only .log files
+</ParamField>
+
+<ParamField path="--review" type="flag">
+  Download only fedora-review files
+</ParamField>
+
+Example:
+```bash
+# Download everything
+copr-cli download-build 12345
+
+# Download only RPMs
+copr-cli download-build 12345 --rpms
+
+# Download specific chroot
+copr-cli download-build 12345 -r fedora-39-x86_64
+
+# Download to specific directory
+copr-cli download-build 12345 -d /tmp/builds
+```
+
+### list-builds
+
+List all builds in a project.
+
+```bash
+copr-cli list-builds PROJECT [--output-format FORMAT]
+```
+
+<ParamField path="--output-format" type="enum">
+  Output format: `json`, `text`, `text-row` (default: `text-row`)
+</ParamField>
+
+Example:
+```bash
+copr-cli list-builds myproject
+copr-cli list-builds myproject --output-format json
+```
+
+## Chroot Commands
+
+### list-chroots
+
+List all available chroots.
+
+```bash
+copr-cli list-chroots
+```
+
+### edit-chroot
+
+Edit chroot configuration.
+
+```bash
+copr-cli edit-chroot OWNER/PROJECT/CHROOT [OPTIONS]
+```
+
+<ParamField path="--upload-comps" type="path">
+  Upload comps.xml file
+</ParamField>
+
+<ParamField path="--delete-comps" type="flag">
+  Delete existing comps.xml
+</ParamField>
+
+<ParamField path="--packages" type="string">
+  Space-separated packages to add to buildroot
+</ParamField>
+
+<ParamField path="--repos" type="string">
+  Space-separated additional repository URLs
+</ParamField>
+
+<ParamField path="--modules" type="string">
+  Comma-separated modules to enable/disable (e.g., `module1:stream,!module2:stream`)
+</ParamField>
+
+<ParamField path="--rpmbuild-with" type="string">
+  rpmbuild --with option. Can be specified multiple times.
+</ParamField>
+
+<ParamField path="--rpmbuild-without" type="string">
+  rpmbuild --without option. Can be specified multiple times.
+</ParamField>
+
+<ParamField path="--isolation" type="enum">
+  Isolation method: `simple`, `nspawn`, `default`
+</ParamField>
+
+<ParamField path="--bootstrap" type="enum">
+  Bootstrap mode: `unchanged`, `default`, `on`, `off`, `image`
+</ParamField>
+
+<ParamField path="--bootstrap-image" type="string">
+  Custom container image for bootstrap (implies `--bootstrap=image`)
+</ParamField>
+
+<ParamField path="--reset" type="string">
+  Reset specific fields to defaults. Can be specified multiple times.
+</ParamField>
+
+Example:
+```bash
+copr-cli edit-chroot myproject/fedora-39-x86_64 \
+  --packages "gcc make" \
+  --repos "https://example.com/repo"
+```
+
+### get-chroot
+
+Get chroot configuration.
+
+```bash
+copr-cli get-chroot OWNER/PROJECT/CHROOT [--output-format FORMAT]
+```
+
+Example:
+```bash
+copr-cli get-chroot myproject/fedora-39-x86_64
+copr-cli get-chroot myproject/fedora-39-x86_64 --output-format json
+```
+
+## Package Management
+
+### add-package-scm
+
+Add a package with SCM source.
+
+```bash
+copr-cli add-package-scm PROJECT --name PKGNAME --clone-url URL [OPTIONS]
+```
+
+<ParamField path="--name" type="string" required>
+  Package name
+</ParamField>
+
+<ParamField path="--clone-url" type="url" required>
+  Git/SVN repository URL
+</ParamField>
+
+<ParamField path="--commit" type="string">
+  Branch, tag, or commit
+</ParamField>
+
+<ParamField path="--subdir" type="string">
+  Subdirectory path
+</ParamField>
+
+<ParamField path="--spec" type="string">
+  Path to .spec file
+</ParamField>
+
+<ParamField path="--type" type="enum">
+  VCS type: `git`, `svn`
+</ParamField>
+
+<ParamField path="--method" type="enum">
+  Build method: `rpkg`, `tito`, `tito_test`, `make_srpm`
+</ParamField>
+
+<ParamField path="--webhook-rebuild" type="enum">
+  Enable auto-rebuild: `on`, `off`
+</ParamField>
+
+<ParamField path="--max-builds" type="integer">
+  Keep only N newest builds (0 = unlimited)
+</ParamField>
+
+<ParamField path="--timeout" type="integer">
+  Build timeout in seconds (default: 18000)
+</ParamField>
+
+Example:
+```bash
+copr-cli add-package-scm myproject \
+  --name mypackage \
+  --clone-url https://github.com/user/repo \
+  --webhook-rebuild on
+```
+
+### edit-package-scm
+
+Edit an existing SCM package. Uses same options as `add-package-scm`.
+
+```bash
+copr-cli edit-package-scm PROJECT --name PKGNAME [OPTIONS]
+```
+
+### add-package-pypi / edit-package-pypi
+
+Add or edit a PyPI package.
+
+```bash
+copr-cli add-package-pypi PROJECT --name PKGNAME --packagename PYPINAME [OPTIONS]
+```
+
+### add-package-rubygems / edit-package-rubygems
+
+Add or edit a RubyGems package.
+
+```bash
+copr-cli add-package-rubygems PROJECT --name PKGNAME --gem GEM [OPTIONS]
+```
+
+### add-package-distgit / edit-package-distgit
+
+Add or edit a DistGit package.
+
+```bash
+copr-cli add-package-distgit PROJECT --name PKGNAME [OPTIONS]
+```
+
+### add-package-custom / edit-package-custom
+
+Add or edit a custom package.
+
+```bash
+copr-cli add-package-custom PROJECT --name PKGNAME --script FILE [OPTIONS]
+```
+
+### list-packages
+
+List all packages in a project.
+
+```bash
+copr-cli list-packages PROJECT [OPTIONS]
+```
+
+<ParamField path="--with-latest-build" type="flag">
+  Include latest build info
+</ParamField>
+
+<ParamField path="--with-latest-succeeded-build" type="flag">
+  Include latest successful build info
+</ParamField>
+
+<ParamField path="--with-all-builds" type="flag">
+  Include all builds info
+</ParamField>
+
+<ParamField path="--output-format" type="enum">
+  Output format: `json`, `text`, `text-row`
+</ParamField>
+
+### list-package-names
+
+List only package names (one per line).
+
+```bash
+copr-cli list-package-names PROJECT
+```
+
+### get-package
+
+Get detailed package information.
+
+```bash
+copr-cli get-package PROJECT --name PKGNAME [OPTIONS]
+```
+
+### delete-package
+
+Delete a package and all its builds.
+
+```bash
+copr-cli delete-package PROJECT --name PKGNAME
+```
+
+### reset-package
+
+Clear package source configuration.
+
+```bash
+copr-cli reset-package PROJECT --name PKGNAME
+```
+
+### build-package
+
+Build a package from its configured source.
+
+```bash
+copr-cli build-package PROJECT --name PKGNAME [BUILD_OPTIONS]
+```
+
+Accepts the same build options as the `build` command.
+
+Example:
+```bash
+copr-cli build-package myproject --name mypackage
+copr-cli build-package myproject --name mypackage -r fedora-39-x86_64
+```
+
+## Monitoring
+
+### monitor
+
+Monitor package build states.
+
+```bash
+copr-cli monitor PROJECT [OPTIONS]
+```
+
+<ParamField path="--dirname" type="string">
+  Project subdirectory name (e.g., `foo:pr:125`)
+</ParamField>
+
+<ParamField path="--fields" type="string">
+  Comma-separated list of fields to display. Default: `name,chroot,build_id,state,pkg_version`
+  
+  Available fields: `name`, `chroot`, `build_id`, `state`, `pkg_version`, `url_build_log`, `url_backend_log`, `url_build`
+</ParamField>
+
+<ParamField path="--output-format" type="enum">
+  Output format: `json`, `text`, `text-row`
+</ParamField>
+
+Example:
+```bash
+copr-cli monitor myproject
+copr-cli monitor myproject --fields name,chroot,state
+copr-cli monitor myproject --output-format json
+```
+
+## Permissions
+
+### edit-permissions
+
+Edit user permissions for a project.
+
+```bash
+copr-cli edit-permissions PROJECT --admin USER --builder USER
+```
+
+<ParamField path="--admin" type="string">
+  Set admin role for user. Format: `USERNAME[=VALUE]` where VALUE is `approved`, `request`, or `nothing`
+</ParamField>
+
+<ParamField path="--builder" type="string">
+  Set builder role for user. Format: `USERNAME[=VALUE]` where VALUE is `approved`, `request`, or `nothing`
+</ParamField>
+
+Example:
+```bash
+copr-cli edit-permissions myproject --builder john=approved
+copr-cli edit-permissions myproject --admin jane=approved
+```
+
+### list-permissions
+
+List all permissions for a project.
+
+```bash
+copr-cli list-permissions PROJECT
+```
+
+### request-permissions
+
+Request permissions for yourself.
+
+```bash
+copr-cli request-permissions PROJECT --admin --builder
+```
+
+<ParamField path="--admin" type="enum" optional>
+  Request admin permissions: `request` (default), `nothing`
+</ParamField>
+
+<ParamField path="--builder" type="enum" optional>
+  Request builder permissions: `request` (default), `nothing`
+</ParamField>
+
+Example:
+```bash
+copr-cli request-permissions username/project --builder
+copr-cli request-permissions username/project --admin --builder
+```
+
+## Utility Commands
+
+### mock-config
+
+Get Mock configuration for a chroot.
+
+```bash
+copr-cli mock-config PROJECT CHROOT
+```
+
+Example:
+```bash
+copr-cli mock-config myproject fedora-39-x86_64 > mock.cfg
+mock -r mock.cfg --shell
+```
+
+## Project Name Formats
+
+Most commands accept projects in these formats:
+
+- `project` - Your own project (requires authentication)
+- `username/project` - Another user's project
+- `@groupname/project` - Group project
+- `project:tag` - Side repository (for build commands)
+
+Examples:
+```bash
+copr-cli get myproject
+copr-cli get john/myproject
+copr-cli get @somegroup/project
+copr-cli build myproject:testing package.rpm
+```

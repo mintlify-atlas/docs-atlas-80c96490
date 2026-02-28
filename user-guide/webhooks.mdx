@@ -1,0 +1,432 @@
+---
+title: Webhooks
+description: Setting up automatic builds with GitHub, GitLab, Pagure, and Bitbucket webhooks
+---
+
+Copr supports webhooks from popular Git hosting platforms to automatically trigger builds when you push code, create tags, or open pull requests.
+
+## Quick setup
+
+<Steps>
+  <Step title="Create an SCM package">
+    Set up a package with an SCM source and enable auto-rebuild:
+    
+    ```bash
+    copr-cli add-package-scm my-project \
+      --name mypackage \
+      --clone-url https://github.com/user/repo.git \
+      --webhook-rebuild on
+    ```
+  </Step>
+  
+  <Step title="Get webhook URL">
+    Navigate to your project's **Settings** → **Integrations** tab in the web UI.
+    
+    Your webhook URL will be in the format:
+    ```
+    https://copr.fedorainfracloud.org/webhooks/<GIT_FORGE>/<ID>/<UUID>/
+    ```
+  </Step>
+  
+  <Step title="Configure webhook">
+    Add the webhook URL to your Git hosting platform (GitHub, GitLab, Pagure, or Bitbucket).
+  </Step>
+</Steps>
+
+Now Copr will automatically rebuild your package when you push to your repository.
+
+## Supported events
+
+Webhooks can trigger builds on:
+
+- **Push events**: Commits pushed to branches
+- **Tag events**: New tags created
+- **Pull request events**: Pull requests opened or updated (platform-dependent)
+
+## GitHub webhooks
+
+<Steps>
+  <Step title="Navigate to webhook settings">
+    In your GitHub repository, go to **Settings** → **Webhooks**.
+  </Step>
+  
+  <Step title="Add webhook">
+    Click **Add webhook**.
+  </Step>
+  
+  <Step title="Configure webhook">
+    - **Payload URL**: Your Copr webhook URL
+    - **Content type**: Select `application/json`
+    - **Which events**: Select individual events
+      - Enable **Pushes** for branch commits
+      - Enable **Branch or tag creation** for tag events
+  </Step>
+  
+  <Step title="Save webhook">
+    Click **Add webhook** to save.
+  </Step>
+</Steps>
+
+### GitHub example
+
+```
+Payload URL: https://copr.fedorainfracloud.org/webhooks/github/12345/a1b2c3d4-uuid/
+Content type: application/json
+Events: Pushes, Branch or tag creation
+```
+
+## GitLab webhooks
+
+<Steps>
+  <Step title="Navigate to webhook settings">
+    In your GitLab project, go to **Settings** → **Webhooks**.
+  </Step>
+  
+  <Step title="Configure webhook">
+    - **URL**: Your Copr webhook URL
+    - **Trigger**: Select event triggers
+      - Enable **Push events**
+      - Enable **Tag push events** (if building from tags)
+  </Step>
+  
+  <Step title="Add webhook">
+    Click **Add webhook**.
+  </Step>
+</Steps>
+
+### GitLab example
+
+```
+URL: https://copr.fedorainfracloud.org/webhooks/gitlab/12345/a1b2c3d4-uuid/
+Triggers: Push events, Tag push events
+```
+
+## Pagure webhooks
+
+For detailed Pagure integration, see the [Pagure integration guide](http://frostyx.cz/posts/copr-pagure-integration).
+
+Pagure integration offers advanced features like PR builds and commit status reporting.
+
+## Bitbucket webhooks
+
+<Steps>
+  <Step title="Navigate to webhook settings">
+    In your Bitbucket repository, go to **Settings** → **Workflow** → **Webhooks**.
+  </Step>
+  
+  <Step title="Add webhook">
+    Click **Add webhook**.
+  </Step>
+  
+  <Step title="Configure webhook">
+    - **Title**: Name your webhook (e.g., "Copr")
+    - **URL**: Your Copr webhook URL
+    - **Triggers**: Select **Repository push**
+  </Step>
+  
+  <Step title="Save webhook">
+    Click **Save**.
+  </Step>
+</Steps>
+
+### Bitbucket example
+
+```
+Title: Copr Auto Build
+URL: https://copr.fedorainfracloud.org/webhooks/bitbucket/12345/a1b2c3d4-uuid/
+Trigger: Repository push
+```
+
+## Tag events
+
+Webhooks can trigger builds when you create Git tags.
+
+### Tag name format
+
+For tag events to work correctly, the tag name should contain the package name in this format:
+
+```
+PKGNAME-VERSION[-RELEASE]
+```
+
+You can replace dashes with underscores:
+
+```
+PKGNAME_VERSION[_RELEASE]
+```
+
+### Examples of valid tags
+
+- `mypackage-1.2.3`
+- `mypackage-1.2.3-1`
+- `mypackage_1.2.3`
+
+### Different tag patterns
+
+If your tag name doesn't include the package name, explicitly specify the package in the webhook URL:
+
+```
+https://copr.fedorainfracloud.org/webhooks/<GIT_FORGE>/<ID>/<UUID>/<PACKAGE_NAME>/
+```
+
+**Example:**
+
+Your Copr package name is `my-package`, but your GitHub tag is just `1.22.3`:
+
+```
+https://copr.fedorainfracloud.org/webhooks/github/12345/abc-uuid/my-package/
+```
+
+<Note>
+Replace hyphens in the package name with underscores in the URL:
+`my-package` becomes `my_package`
+</Note>
+
+## Custom webhooks
+
+Trigger builds programmatically with custom webhooks.
+
+### Basic custom webhook
+
+```bash
+curl -X POST https://copr.fedorainfracloud.org/webhooks/custom/<ID>/<UUID>/<PACKAGE_NAME>/
+```
+
+<Note>
+The package must exist in your project, and you must use the `POST` HTTP method.
+</Note>
+
+### Custom webhook with data
+
+Send data to your custom build script:
+
+```bash
+curl -X POST --data "custom payload" \
+  https://copr.fedorainfracloud.org/webhooks/custom/<ID>/<UUID>/<PACKAGE_NAME>/
+```
+
+If your package uses the [Custom source type](/user-guide/build-sources#custom-source-script), the POST data will be available in a `hook_data` file.
+
+### Custom webhook with subdirectories
+
+Build into custom subdirectories (subprojects):
+
+```bash
+# Custom subdirectory
+curl -X POST \
+  https://copr.fedorainfracloud.org/webhooks/custom-dir/<OWNER>/<PROJECT>:custom:<SUFFIX>/<UUID>/<PACKAGE_NAME>/
+
+# Pull request subdirectory
+curl -X POST \
+  https://copr.fedorainfracloud.org/webhooks/custom-dir/<OWNER>/<PROJECT>:pr:<NUMBER>/<UUID>/<PACKAGE_NAME>/
+```
+
+**Examples:**
+
+```bash
+# Build into myproject:custom:experimental
+curl -X POST \
+  https://copr.fedorainfracloud.org/webhooks/custom-dir/user/myproject:custom:experimental/abc-uuid/mypackage/
+
+# Build into myproject:pr:123 (auto-deleted after 40 days)
+curl -X POST \
+  https://copr.fedorainfracloud.org/webhooks/custom-dir/user/myproject:pr:123/abc-uuid/mypackage/
+```
+
+<Note>
+`:pr:` subdirectories are automatically removed after 40 days of build inactivity.
+</Note>
+
+## Multiple packages in one repository
+
+If your Git repository contains multiple Copr packages, all packages will be rebuilt when a webhook is triggered, unless you specify a package name in the webhook URL.
+
+### Selective package builds
+
+Include the package name in the webhook URL to build only that package:
+
+```
+https://copr.fedorainfracloud.org/webhooks/<GIT_FORGE>/<ID>/<UUID>/<PACKAGE_NAME>/
+```
+
+### Example: Monorepo with multiple packages
+
+```bash
+# Add multiple packages from the same repo
+copr-cli add-package-scm my-project --name package1 \
+  --clone-url https://github.com/user/monorepo.git \
+  --subdirectory pkg1/ --webhook-rebuild on
+
+copr-cli add-package-scm my-project --name package2 \
+  --clone-url https://github.com/user/monorepo.git \
+  --subdirectory pkg2/ --webhook-rebuild on
+
+# Set up webhooks with package names
+# Webhook 1: ...webhooks/github/12345/uuid1/package1/
+# Webhook 2: ...webhooks/github/12345/uuid2/package2/
+```
+
+## Webhook security
+
+Webhook URLs contain a UUID that acts as a secret token. Keep these URLs private to prevent unauthorized builds.
+
+### Regenerating webhook URLs
+
+If your webhook URL is compromised, you can regenerate it by:
+
+1. Removing the package
+2. Re-adding it (this generates a new UUID)
+
+Or contact Copr administrators for assistance.
+
+## Troubleshooting webhooks
+
+### Webhook not triggering builds
+
+<Accordion title="Check package auto-rebuild setting">
+Ensure `webhook-rebuild` is enabled:
+
+```bash
+copr-cli edit-package-scm my-project --name mypackage --webhook-rebuild on
+```
+</Accordion>
+
+<Accordion title="Verify webhook URL">
+Make sure the webhook URL in your Git platform matches the one in Copr's Integrations tab.
+</Accordion>
+
+<Accordion title="Check Git platform webhook deliveries">
+Most Git platforms have a webhook delivery log showing recent webhook requests and responses.
+
+- GitHub: Settings → Webhooks → Recent Deliveries
+- GitLab: Settings → Webhooks → Recent events
+</Accordion>
+
+<Accordion title="Verify package exists">
+The package must exist in your Copr project before webhooks will work:
+
+```bash
+copr-cli list-packages my-project
+```
+</Accordion>
+
+### Tag builds not working
+
+<Accordion title="Check tag name format">
+Ensure your tag name follows the `PKGNAME-VERSION` format or include the package name in the webhook URL.
+</Accordion>
+
+<Accordion title="Enable tag events">
+Make sure tag creation events are enabled in your Git platform's webhook configuration.
+</Accordion>
+
+### Multiple packages building unexpectedly
+
+<Accordion title="Specify package in webhook URL">
+If you only want to build specific packages, add the package name to the webhook URL:
+
+```
+.../webhooks/<forge>/<id>/<uuid>/<package_name>/
+```
+</Accordion>
+
+## Advanced webhook workflows
+
+### Pull request builds
+
+Some forges support pull request builds. When a pull request is opened or updated, Copr can automatically build the PR branch.
+
+This is particularly well-supported with Pagure integration.
+
+### Branch-specific builds
+
+Configure different packages for different branches:
+
+```bash
+# Package for main branch
+copr-cli add-package-scm my-project --name myapp-stable \
+  --clone-url https://github.com/user/myapp.git \
+  --committish main --webhook-rebuild on
+
+# Package for develop branch  
+copr-cli add-package-scm my-project --name myapp-devel \
+  --clone-url https://github.com/user/myapp.git \
+  --committish develop --webhook-rebuild on
+```
+
+Use separate webhooks with package names to build the appropriate package for each branch.
+
+### CI/CD integration
+
+Integrate Copr webhooks into your CI/CD pipeline:
+
+```yaml
+# .github/workflows/build.yml
+name: Trigger Copr Build
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  trigger-copr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Copr webhook
+        run: |
+          curl -X POST ${{ secrets.COPR_WEBHOOK_URL }}
+```
+
+## Webhook URLs reference
+
+### Format
+
+```
+https://copr.fedorainfracloud.org/webhooks/<FORGE>/<ID>/<UUID>/[PACKAGE_NAME]/
+```
+
+### Components
+
+- `<FORGE>`: Git platform (`github`, `gitlab`, `pagure`, `bitbucket`, `custom`)
+- `<ID>`: Copr project ID
+- `<UUID>`: Secret token (automatically generated)
+- `[PACKAGE_NAME]`: Optional package name to build
+
+### Examples
+
+**GitHub webhook:**
+```
+https://copr.fedorainfracloud.org/webhooks/github/12345/a1b2c3d4-e5f6-7890/
+```
+
+**GitLab webhook with package name:**
+```
+https://copr.fedorainfracloud.org/webhooks/gitlab/12345/a1b2c3d4-e5f6-7890/my_package/
+```
+
+**Custom webhook to subdirectory:**
+```
+https://copr.fedorainfracloud.org/webhooks/custom-dir/user/project:pr:42/a1b2c3d4-uuid/package/
+```
+
+## Best practices
+
+<Accordion title="Use separate packages for different branches">
+Instead of one package that builds from multiple branches, create separate packages for each branch. This gives you better control and clearer build history.
+</Accordion>
+
+<Accordion title="Test webhooks before relying on them">
+After setting up a webhook, make a test commit or tag to ensure builds trigger correctly.
+</Accordion>
+
+<Accordion title="Document your webhook setup">
+Keep notes on which webhooks are configured and for which packages, especially in projects with multiple packages.
+</Accordion>
+
+<Accordion title="Use meaningful tag names">
+Include the package name and version in tags to make webhook builds more predictable:
+`myapp-1.2.3` instead of just `v1.2.3`
+</Accordion>
+
+<Accordion title="Consider rate limiting">
+Avoid triggering too many builds in rapid succession. Copr may rate-limit excessive webhook requests.
+</Accordion>

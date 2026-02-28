@@ -1,0 +1,674 @@
+---
+title: Build Endpoints
+description: Create and manage builds in Copr projects
+---
+
+## Get Build
+
+<CodeGroup>
+```bash GET /api_3/build/{build_id}
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/build/12345"
+```
+</CodeGroup>
+
+Get details for a single Copr build.
+
+### Path Parameters
+
+<ParamField path="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="integer">
+  Build ID
+</ResponseField>
+
+<ResponseField name="state" type="string">
+  Build state: "importing", "pending", "starting", "running", "succeeded", "failed", "canceled", "skipped"
+</ResponseField>
+
+<ResponseField name="projectname" type="string">
+  Project name
+</ResponseField>
+
+<ResponseField name="ownername" type="string">
+  Project owner name
+</ResponseField>
+
+<ResponseField name="repo_url" type="string">
+  Repository URL for DNF/Yum
+</ResponseField>
+
+<ResponseField name="source_package" type="object">
+  Source package information
+  <Expandable title="properties">
+    <ResponseField name="name" type="string">
+      Package name
+    </ResponseField>
+    <ResponseField name="version" type="string">
+      Package version
+    </ResponseField>
+    <ResponseField name="url" type="string">
+      SRPM download URL
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="submitted_on" type="integer">
+  Unix timestamp when build was submitted
+</ResponseField>
+
+<ResponseField name="started_on" type="integer">
+  Unix timestamp when build started
+</ResponseField>
+
+<ResponseField name="ended_on" type="integer">
+  Unix timestamp when build ended
+</ResponseField>
+
+<ResponseField name="submitter" type="string">
+  Username of build submitter
+</ResponseField>
+
+<ResponseField name="chroots" type="array">
+  List of chroot names where build is executed
+</ResponseField>
+
+<ResponseField name="is_background" type="boolean">
+  Whether this is a background build
+</ResponseField>
+
+---
+
+## List Builds
+
+<CodeGroup>
+```bash GET /api_3/build/list
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/build/list?ownername=@copr&projectname=copr-dev&limit=20"
+```
+</CodeGroup>
+
+List all builds in a Copr project with pagination and filtering.
+
+### Query Parameters
+
+<ParamField query="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField query="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField query="packagename" type="string">
+  Filter by package name
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by build status (succeeded, failed, canceled, etc.)
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Number of items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+### Response
+
+<ResponseField name="items" type="array">
+  Array of build objects (same structure as Get Build)
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Pagination metadata
+</ResponseField>
+
+---
+
+## Get Source Chroot
+
+<CodeGroup>
+```bash GET /api_3/build/source-chroot/{build_id}
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/build/source-chroot/12345"
+```
+</CodeGroup>
+
+Get source chroot information for a build (SRPM build phase).
+
+### Path Parameters
+
+<ParamField path="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+### Response
+
+<ResponseField name="state" type="string">
+  Source build state
+</ResponseField>
+
+<ResponseField name="result_url" type="string">
+  URL to source build results
+</ResponseField>
+
+---
+
+## Get Source Build Config
+
+<CodeGroup>
+```bash GET /api_3/build/source-build-config/{build_id}
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/build/source-build-config/12345"
+```
+</CodeGroup>
+
+Get source build configuration for a build.
+
+### Path Parameters
+
+<ParamField path="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+### Response
+
+<ResponseField name="source_type" type="string">
+  Source type: "link", "upload", "scm", "pypi", "rubygems", "custom"
+</ResponseField>
+
+<ResponseField name="source_dict" type="object">
+  Source-specific configuration dictionary
+</ResponseField>
+
+<ResponseField name="memory_limit" type="integer">
+  Memory limit in MB
+</ResponseField>
+
+<ResponseField name="timeout" type="integer">
+  Build timeout in seconds
+</ResponseField>
+
+<ResponseField name="is_background" type="boolean">
+  Whether this is a background build
+</ResponseField>
+
+---
+
+## Get Built Packages
+
+<CodeGroup>
+```bash GET /api_3/build/built-packages/{build_id}
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/build/built-packages/12345"
+```
+</CodeGroup>
+
+Get built packages (NEVRA dicts) for a given build.
+
+### Path Parameters
+
+<ParamField path="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+### Response
+
+Returns a dictionary where keys are chroot names and values are package information.
+
+---
+
+## Cancel Build
+
+<CodeGroup>
+```bash PUT /api_3/build/cancel/{build_id}
+curl -X PUT \
+  "https://copr.fedorainfracloud.org/api_3/build/cancel/12345"
+```
+</CodeGroup>
+
+Cancel a running or pending build. Requires authentication.
+
+### Path Parameters
+
+<ParamField path="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+### Response
+
+Returns the canceled build object with 200 status code.
+
+---
+
+## Create Build from URL
+
+<CodeGroup>
+```bash POST /api_3/build/create/url
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/build/create/url" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownername": "myuser",
+    "projectname": "my-project",
+    "pkgs": "https://example.com/package.src.rpm",
+    "chroots": ["fedora-40-x86_64"]
+  }'
+```
+</CodeGroup>
+
+Create a build from SRPM URL(s). Requires authentication.
+
+### Request Body
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="pkgs" type="string" required>
+  SRPM URL(s), one per line for multiple packages
+</ParamField>
+
+<ParamField body="chroots" type="array">
+  List of chroot names to build in (defaults to all project chroots)
+</ParamField>
+
+<ParamField body="background" type="boolean" default="false">
+  Run as background build
+</ParamField>
+
+<ParamField body="timeout" type="integer">
+  Build timeout in seconds
+</ParamField>
+
+<ParamField body="enable_net" type="boolean">
+  Enable network access during build
+</ParamField>
+
+### Response
+
+<ResponseField name="items" type="array">
+  Array of created build objects
+</ResponseField>
+
+---
+
+## Create Build from Upload
+
+<CodeGroup>
+```bash POST /api_3/build/create/upload
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/build/create/upload" \
+  -F "ownername=myuser" \
+  -F "projectname=my-project" \
+  -F "pkgs=@/path/to/package.src.rpm" \
+  -F "chroots=[\"fedora-40-x86_64\"]"
+```
+</CodeGroup>
+
+Create a build from an uploaded SRPM file. Requires authentication.
+
+### Request Body (multipart/form-data)
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="pkgs" type="file" required>
+  SRPM file to upload
+</ParamField>
+
+<ParamField body="chroots" type="array">
+  List of chroot names to build in
+</ParamField>
+
+### Response
+
+Returns the created build object with 200 status code.
+
+---
+
+## Create Build from SCM
+
+<CodeGroup>
+```bash POST /api_3/build/create/scm
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/build/create/scm" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownername": "myuser",
+    "projectname": "my-project",
+    "clone_url": "https://github.com/user/repo.git",
+    "committish": "main",
+    "subdirectory": "",
+    "spec": "package.spec",
+    "source_build_method": "rpkg",
+    "chroots": ["fedora-40-x86_64"]
+  }'
+```
+</CodeGroup>
+
+Create a build from a source code management system (Git, SVN). Requires authentication.
+
+### Request Body
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="clone_url" type="string" required>
+  SCM repository URL
+</ParamField>
+
+<ParamField body="committish" type="string">
+  Branch, tag, or commit hash (defaults to default branch)
+</ParamField>
+
+<ParamField body="subdirectory" type="string">
+  Subdirectory within repository
+</ParamField>
+
+<ParamField body="spec" type="string">
+  Path to .spec file within repository
+</ParamField>
+
+<ParamField body="scm_type" type="string">
+  SCM type: "git" or "svn" (auto-detected from URL)
+</ParamField>
+
+<ParamField body="source_build_method" type="string">
+  SRPM build method: "rpkg", "tito", "tito_test", "make_srpm"
+</ParamField>
+
+<ParamField body="chroots" type="array">
+  List of chroot names to build in
+</ParamField>
+
+### Response
+
+Returns the created build object with 200 status code.
+
+---
+
+## Create Build from DistGit
+
+<CodeGroup>
+```bash POST /api_3/build/create/distgit
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/build/create/distgit" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownername": "myuser",
+    "projectname": "my-project",
+    "package_name": "python3-requests",
+    "distgit": "fedora",
+    "committish": "f40",
+    "chroots": ["fedora-40-x86_64"]
+  }'
+```
+</CodeGroup>
+
+Create a build from a DistGit repository (Fedora, CentOS). Requires authentication.
+
+### Request Body
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="package_name" type="string" required>
+  Package name in DistGit
+</ParamField>
+
+<ParamField body="distgit" type="string">
+  DistGit instance: "fedora", "centos", etc.
+</ParamField>
+
+<ParamField body="namespace" type="string">
+  DistGit namespace (e.g., "rpms")
+</ParamField>
+
+<ParamField body="committish" type="string">
+  Branch or tag name
+</ParamField>
+
+<ParamField body="chroots" type="array">
+  List of chroot names to build in
+</ParamField>
+
+### Response
+
+Returns the created build object with 200 status code.
+
+---
+
+## Create Build from PyPI
+
+<CodeGroup>
+```bash POST /api_3/build/create/pypi
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/build/create/pypi" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownername": "myuser",
+    "projectname": "my-project",
+    "pypi_package_name": "requests",
+    "pypi_package_version": "2.28.1",
+    "python_versions": ["3"],
+    "chroots": ["fedora-40-x86_64"]
+  }'
+```
+</CodeGroup>
+
+Create a build from a PyPI package. Requires authentication.
+
+### Request Body
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="pypi_package_name" type="string" required>
+  Package name on PyPI
+</ParamField>
+
+<ParamField body="pypi_package_version" type="string">
+  Specific version (defaults to latest)
+</ParamField>
+
+<ParamField body="python_versions" type="array">
+  Python versions to build for (e.g., ["3", "3.9"])
+</ParamField>
+
+<ParamField body="spec_generator" type="string">
+  Spec generator tool
+</ParamField>
+
+<ParamField body="spec_template" type="string">
+  Custom spec template
+</ParamField>
+
+<ParamField body="chroots" type="array">
+  List of chroot names to build in
+</ParamField>
+
+### Response
+
+Returns the created build object with 200 status code.
+
+---
+
+## Create Build from RubyGems
+
+<CodeGroup>
+```bash POST /api_3/build/create/rubygems
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/build/create/rubygems" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownername": "myuser",
+    "projectname": "my-project",
+    "gem_name": "rails",
+    "chroots": ["fedora-40-x86_64"]
+  }'
+```
+</CodeGroup>
+
+Create a build from a RubyGems package. Requires authentication.
+
+### Request Body
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="gem_name" type="string" required>
+  Gem name on RubyGems.org
+</ParamField>
+
+<ParamField body="chroots" type="array">
+  List of chroot names to build in
+</ParamField>
+
+### Response
+
+Returns the created build object with 200 status code.
+
+---
+
+## Create Build from Custom Method
+
+<CodeGroup>
+```bash POST /api_3/build/create/custom
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/build/create/custom" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownername": "myuser",
+    "projectname": "my-project",
+    "script": "#!/bin/bash\nmake srpm",
+    "chroot": "fedora-40-x86_64",
+    "builddeps": "make gcc",
+    "resultdir": "results"
+  }'
+```
+</CodeGroup>
+
+Create a build using a custom script. Requires authentication.
+
+### Request Body
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="script" type="string" required>
+  Custom build script
+</ParamField>
+
+<ParamField body="chroot" type="string" required>
+  Chroot name for SRPM build
+</ParamField>
+
+<ParamField body="builddeps" type="string">
+  Build dependencies
+</ParamField>
+
+<ParamField body="resultdir" type="string">
+  Directory containing build results
+</ParamField>
+
+<ParamField body="repos" type="array">
+  Additional repository URLs
+</ParamField>
+
+### Response
+
+Returns the created build object with 200 status code.
+
+---
+
+## Delete Build
+
+<CodeGroup>
+```bash DELETE /api_3/build/delete/{build_id}
+curl -X DELETE \
+  "https://copr.fedorainfracloud.org/api_3/build/delete/12345"
+```
+</CodeGroup>
+
+Delete a build by its ID. Requires authentication and appropriate permissions.
+
+### Path Parameters
+
+<ParamField path="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+### Response
+
+Returns the deleted build object with 200 status code.
+
+---
+
+## Delete Multiple Builds
+
+<CodeGroup>
+```bash DELETE /api_3/build/delete/list
+curl -X DELETE \
+  "https://copr.fedorainfracloud.org/api_3/build/delete/list" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "builds": [12345, 12346, 12347]
+  }'
+```
+</CodeGroup>
+
+Delete multiple builds specified by a list of IDs. Requires authentication.
+
+### Request Body
+
+<ParamField body="builds" type="array" required>
+  Array of build IDs to delete
+</ParamField>
+
+### Response
+
+<ResponseField name="builds" type="array">
+  Array of deleted build IDs
+</ResponseField>

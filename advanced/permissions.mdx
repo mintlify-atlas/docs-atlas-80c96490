@@ -1,0 +1,370 @@
+---
+title: Project Permissions
+description: Managing access control and permissions for Copr projects
+---
+
+Copr provides a flexible permission system that allows project owners to grant build and administrative access to other users.
+
+## Permission Model
+
+Permissions are managed through the `CoprPermission` model, which establishes relationships between users and projects with specific access levels.
+
+```python
+class CoprPermission:
+    user_id: Integer      # User receiving permission
+    copr_id: Integer      # Project granting permission
+    copr_builder: SmallInteger  # Builder permission level
+    copr_admin: SmallInteger    # Admin permission level
+```
+
+## Permission Types
+
+There are two types of permissions that can be granted:
+
+### Builder Permission
+
+Allows a user to:
+- Submit new builds to the project
+- Rebuild existing packages
+- Cancel their own builds
+
+### Admin Permission
+
+Allows a user to:
+- Everything a builder can do
+- Edit project settings
+- Manage chroots
+- Approve or deny permission requests from other users
+- Delete builds
+- Manage packages
+
+<Note>
+Admin permission implicitly grants builder permission.
+</Note>
+
+## Permission States
+
+Each permission type can be in one of these states:
+
+| State | Value | Description |
+|-------|-------|-------------|
+| `nothing` | 0 | No permission (default) |
+| `request` | 1 | Permission requested, pending approval |
+| `approved` | 2 | Permission granted |
+
+<Accordion title="Permission Enum Values">
+
+These correspond to `helpers.PermissionEnum`:
+
+```python
+PermissionEnum.nothing = 0   # No access
+PermissionEnum.request = 1   # Awaiting approval
+PermissionEnum.approved = 2  # Access granted
+```
+
+</Accordion>
+
+## Checking Permissions
+
+### Can User Build?
+
+Check if a user can submit builds to a project:
+
+```python
+if user.can_build_in(copr):
+    # User can submit builds
+    build = create_build(...)
+```
+
+A user can build in a project if:
+1. They are a **Copr admin** (system-wide admin)
+2. They are the **project owner**
+3. They are a **group member** (for group projects)
+4. They have **approved builder** permission
+5. They have **approved admin** permission
+
+### Can User Edit?
+
+Check if a user can edit project settings:
+
+```python
+if user.can_edit(copr):
+    # User can modify project
+    copr.description = "New description"
+```
+
+A user can edit a project if:
+1. They are the **project owner** (for personal projects)
+2. They are a **Copr admin** (unless `ignore_admin=True`)
+3. They have **approved admin** permission
+4. They are a **group member** (for group projects)
+
+<Warning>
+For group projects, the user who created the project doesn't get exclusive edit rights. Group membership is validated every time.
+</Warning>
+
+## Group Permissions
+
+Group projects have special permission handling:
+
+```python
+if copr.is_a_group_project:
+    # Check if user is in the group
+    if user.can_build_in_group(copr.group):
+        # User is a group member
+```
+
+### Group Membership
+
+Group membership is determined by FAS (Fedora Account System) groups:
+
+```python
+user.user_teams        # List of FAS group names
+user.user_groups       # List of Group objects
+
+group.fas_name         # FAS group name
+```
+
+<Expandable title="Group Permission Check Flow">
+
+```python
+def can_build_in_group(user, group):
+    """
+    Check if user can build in group project
+    """
+    return group.fas_name in user.user_teams
+```
+
+For group projects:
+1. User's FAS groups are retrieved from `openid_groups`
+2. If project's group FAS name matches user's team, access granted
+
+</Expandable>
+
+## Managing Permissions
+
+### Get User Permissions
+
+Retrieve permissions for a specific project:
+
+```python
+permissions = user.permissions_for_copr(copr)
+if permissions:
+    builder_state = permissions.copr_builder
+    admin_state = permissions.copr_admin
+```
+
+<Note>
+This method caches permissions during a single request for performance.
+</Note>
+
+### Get All User Permissions
+
+```python
+for perm in user.copr_permissions:
+    print(f"Project: {perm.copr.full_name}")
+    print(f"Builder: {perm.copr_builder}")
+    print(f"Admin: {perm.copr_admin}")
+```
+
+<Warning>
+`user.copr_permissions` automatically filters out permissions for deleted projects. Use `user.copr_permissions_unfiltered` to include deleted projects.
+</Warning>
+
+### Set Permissions
+
+```python
+permission = CoprPermission.query.filter_by(
+    user=target_user,
+    copr=project
+).first()
+
+if not permission:
+    permission = CoprPermission(user=target_user, copr=project)
+
+# Grant builder access
+permission.set_permission('builder', PermissionEnum('approved'))
+
+# Grant admin access
+permission.set_permission('admin', PermissionEnum('approved'))
+
+db.session.add(permission)
+db.session.commit()
+```
+
+### Get Permission Value
+
+```python
+builder_perm = permission.get_permission('builder')
+admin_perm = permission.get_permission('admin')
+
+if builder_perm == PermissionEnum('approved'):
+    print("User has builder access")
+```
+
+## Admin Notifications
+
+Project admins receive notifications for important events:
+
+```python
+admin_emails = copr.admin_mails
+# Returns list of email addresses:
+# - Project owner's email
+# - All users with approved admin permission
+```
+
+Use this for:
+- Build failure notifications
+- Permission requests
+- Project status changes
+
+## System Administrators
+
+Copr system administrators have special privileges:
+
+```python
+if user.admin:
+    # Can edit ANY project
+    # Can approve ANY permission request
+    # Can access ANY builds
+```
+
+<Warning>
+To check edit permissions while ignoring admin status:
+
+```python
+if user.can_edit(copr, ignore_admin=True):
+    # Check without admin override
+```
+</Warning>
+
+## Proven Users
+
+Proven users have elevated build privileges:
+
+```python
+if user.proven:
+    # Can modify builder memory
+    # Can modify build timeout
+```
+
+Proven status is separate from admin status and project permissions.
+
+## Permission Request Workflow
+
+<Steps>
+  <Step title="User Requests Permission">
+    User requests builder or admin access to a project:
+    
+    ```python
+    permission.set_permission('builder', PermissionEnum('request'))
+    ```
+  </Step>
+
+  <Step title="Owner/Admin Reviews">
+    Project owner or admins see pending requests and review them.
+  </Step>
+
+  <Step title="Approve or Deny">
+    Admin approves:
+    ```python
+    permission.set_permission('builder', PermissionEnum('approved'))
+    ```
+    
+    Or denies by setting back to:
+    ```python
+    permission.set_permission('builder', PermissionEnum('nothing'))
+    ```
+  </Step>
+
+  <Step title="User Receives Access">
+    User can now build in the project (if approved).
+  </Step>
+</Steps>
+
+## API Usage
+
+<CodeGroup>
+
+```python Check Build Permission
+from copr.v3 import Client
+from coprs.models import User, Copr
+
+user = User.query.filter_by(username="someuser").first()
+copr = Copr.query.filter_by(name="project").first()
+
+if user.can_build_in(copr):
+    client = Client.create_from_config_file()
+    client.build_proxy.create_from_urls(...)
+```
+
+```python Grant Admin Access
+from coprs.models import CoprPermission, PermissionEnum
+
+perm = CoprPermission.query.filter_by(
+    user_id=user.id,
+    copr_id=copr.id
+).first()
+
+if not perm:
+    perm = CoprPermission(user_id=user.id, copr_id=copr.id)
+
+perm.copr_admin = PermissionEnum('approved')
+db.session.add(perm)
+db.session.commit()
+```
+
+</CodeGroup>
+
+## Common Patterns
+
+### Bulk Permission Check
+
+Check if user can build in multiple projects:
+
+```python
+accessible_projects = [
+    copr for copr in project_list
+    if user.can_build_in(copr)
+]
+```
+
+### Permission Matrix
+
+Generate permission overview for a user:
+
+```python
+for perm in user.copr_permissions:
+    status = []
+    if perm.copr_builder == PermissionEnum('approved'):
+        status.append('builder')
+    if perm.copr_admin == PermissionEnum('approved'):
+        status.append('admin')
+    
+    print(f"{perm.copr.full_name}: {', '.join(status)}")
+```
+
+## Best Practices
+
+1. **Principle of Least Privilege**: Grant builder access unless admin is required
+2. **Review Requests Promptly**: Don't leave permission requests pending
+3. **Use Groups**: For team projects, use group ownership instead of individual permissions
+4. **Audit Regularly**: Review who has access to sensitive projects
+5. **Revoke When Needed**: Remove permissions when users leave teams
+
+## Limitations and Constraints
+
+<Warning>
+- Permission changes take effect immediately
+- No permission history/audit log is maintained
+- Cannot grant partial admin rights (all-or-nothing)
+- Group membership checked against FAS on every request
+- Deleted projects retain permission records (use `copr_permissions`, not `copr_permissions_unfiltered`)
+</Warning>
+
+## Security Considerations
+
+- **System admins** can access everything - limit admin privileges
+- **Group projects** rely on FAS group membership - ensure FAS is properly configured
+- **Permission requests** should be reviewed carefully before approval
+- **No automated approval** - all permissions require explicit approval

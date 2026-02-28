@@ -1,0 +1,240 @@
+---
+title: Custom Source Methods
+description: Build sources for SRPM using user-defined scripts with full control
+---
+
+Custom source method allows you to build sources for SRPM using your own user-defined script. This provides maximum flexibility when generating build sources.
+
+## Overview
+
+The custom source method executes a script that generates a spec file and optionally any other files needed to build a source RPM (tarballs, patches, etc.). The script runs in a mock chroot under a non-privileged user (`mockbuild`) with internet access.
+
+<Note>
+The script **cannot** be an SRPM itself. If your tool generates an SRPM, you must extract it within the script.
+</Note>
+
+## Required Configuration
+
+Only two parameters are required:
+
+### Script
+
+The script file content, written in any scripting language. **Important:**
+- Specify the shebang properly (e.g., `#!/bin/sh` for shell scripts)
+- The interpreter must be available in the chroot (may need to request via `builddeps`)
+- Output files go to the current working directory by default
+
+### Chroot
+
+The mock chroot where the script executes. Default is `fedora-latest-x86_64` (the latest stable or branched Fedora available at build time).
+
+## Optional Parameters
+
+<AccordionGroup>
+  <Accordion title="builddeps">
+    Space-separated list of packages pre-installed into the build chroot before script execution.
+
+    ```bash
+    --script-builddeps "git python3-setuptools rpmdevtools"
+    ```
+  </Accordion>
+
+  <Accordion title="resultdir">
+    Directory where the script generates output. Defaults to current working directory.
+
+    ```bash
+    --script-resultdir results
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Environment Variables
+
+Copr defines these environment variables for your script:
+
+| Variable | Description | Example |
+|----------|-------------|----------|
+| `COPR_OWNER` | Owner of the project (user or group) | `@copr` or `username` |
+| `COPR_PROJECT` | Name of the project | `my-project` |
+| `COPR_PACKAGE` | Name of the package being built | `my-package` |
+| `COPR_RESULTDIR` | Output directory (see `resultdir` parameter) | `/builddir/results` |
+
+## Script Requirements
+
+<Warning>
+The script executes under a **non-privileged user** (`mockbuild`). You cannot install RPM packages from within the script - declare them in `builddeps` instead.
+</Warning>
+
+Your script must generate:
+
+1. **Spec file** (required)
+2. **Source archives** referenced by `Source` statements (typically tarballs)
+3. **Patches** referenced by `Patch` statements (optional)
+
+All files should be placed in the `resultdir` directory.
+
+### Extracting Existing SRPMs
+
+If your tool generates an SRPM, extract it within the script:
+
+```bash
+#!/bin/sh -xe
+git clone example.com/foo.git && cd foo
+make srpm
+bsdtar xf *.src.rpm -C "$COPR_RESULTDIR"
+```
+
+## Examples
+
+### Simple Spec File Download
+
+<CodeGroup>
+
+```bash Trivial Example
+#!/bin/sh -x
+curl https://praiskup.fedorapeople.org/quick-package.spec -O
+```
+
+```bash CLI Usage
+copr add-package-custom PROJECT \
+        --name quick-package \
+        --script script
+
+copr build-package --name quick-package PROJECT
+```
+
+</CodeGroup>
+
+### Using SRPM Source
+
+<CodeGroup>
+
+```bash Script
+#!/bin/sh -x
+make dist-srpm
+rpmdev-extract redhat/rpm/SRPMS/quick-package-*.src.rpm
+mv quick-package*src/* ./
+```
+
+```bash CLI Usage
+copr add-package-custom PROJECT \
+        --name quick-package \
+        --script-builddeps "make rpmdevtools" \
+        --script script
+
+copr build-package --name quick-package PROJECT
+```
+
+</CodeGroup>
+
+### Python Package with Git Submodules
+
+A more complex example showing git cloning, tarball generation, and dynamic versioning:
+
+```bash
+#!/bin/sh
+
+mkdir -p results
+resultdir=$(readlink -f results)
+
+set -x # verbose output
+set -e # fail on any error
+
+# Obtain the source code
+git clone https://github.com/praiskup/resalloc --recursive --depth 1
+cd resalloc
+
+# 1. Generate source tarball into resultdir
+python setup.py sdist -d "$resultdir"
+
+# 2. Copy spec file and modify release number
+cd rpm
+release='~'$(date +"%Y%m%d_%H%M%S")
+sed "s/\(^Release:[[:space:]]*[[:digit:]\+]\)/\1$release/" resalloc.spec \
+    > "$resultdir"/resalloc.spec
+
+# 3. Copy other sources
+cp *.service "$resultdir"
+```
+
+<Expandable title="CLI Configuration">
+
+```bash
+copr add-package-custom PROJECT \
+        --name resalloc \
+        --script script \
+        --script-resultdir results \
+        --script-builddeps 'git' \
+        --script-chroot fedora-rawhide-x86_64
+
+copr build-package --name resalloc PROJECT
+```
+
+</Expandable>
+
+## Webhook Support
+
+Custom source method supports custom webhooks. Unlike other methods, the custom method doesn't parse webhook payloads automatically - that's your responsibility.
+
+### Hook Payload
+
+When a webhook triggers a build, the payload is dumped to `$PWD/hook_payload` file. Your script must:
+
+1. Read and parse the `hook_payload` file
+2. Determine what to build based on the payload
+3. Generate appropriate sources
+
+<Expandable title="Example: GitLab Merge Request">
+
+When a GitLab merge request event triggers the webhook:
+
+- The `hook_payload` file contains JSON describing the merge request
+- Your script should parse it to detect the contributor's fork URL
+- Clone from the contributor's repository instead of the main one
+
+```bash
+#!/bin/sh -e
+
+if [ -f hook_payload ]; then
+    # Parse webhook payload to get fork URL
+    REPO=$(jq -r '.object_attributes.source.git_http_url' hook_payload)
+else
+    # Default repository
+    REPO="https://gitlab.com/owner/repo.git"
+fi
+
+git clone "$REPO"
+# ... rest of source generation
+```
+
+</Expandable>
+
+<Note>
+It's valid to trigger custom webhooks without any payload:
+
+```bash
+curl -X POST <THE_CUSTOM_HOOK_URL>
+```
+</Note>
+
+## Best Practices
+
+1. **Use `set -e`** to fail fast on errors
+2. **Use `set -x`** for verbose output to aid debugging
+3. **Specify absolute paths** or use `$COPR_RESULTDIR` for output
+4. **Test locally** in a mock chroot before deploying
+5. **Keep scripts portable** - avoid root-requiring operations
+6. **Declare all dependencies** in `builddeps` parameter
+
+## Limitations
+
+<Warning>
+- **No root access:** Scripts run as `mockbuild` user
+- **No package installation:** Use `builddeps` to declare required packages
+- **Internet required:** Most scripts need network access for cloning/downloading
+- **Build timeout:** Scripts must complete within project timeout limits
+</Warning>
+
+## Advanced Use Cases
+
+For more complex CI/CD workflows with custom source methods, see [this blog post about CI/CD with Copr](https://pavel.raiskup.cz/blog/copr-ci-and-custom-source-method.html).

@@ -1,0 +1,120 @@
+---
+title: Introduction to Copr
+description: Build RPM packages and create custom repositories with Copr, a free build system for the Fedora community
+---
+
+# Introduction to Copr
+
+Copr ("Community projects") is a service that builds your open-source projects and creates your own RPM repositories. It's designed to be a lightweight build system that allows contributors to create packages, put them in repositories, and make it easy for users to install the packages onto their system.
+
+<Note>
+See Copr in action at [copr.fedoraproject.org](https://copr.fedoraproject.org)
+</Note>
+
+## What is Copr?
+
+Copr is a build system available for everyone with a Fedora Account System (FAS) account. You provide the source RPM, and Copr provides a YUM/DNF repository with your built packages.
+
+**Use Copr for:**
+- Upstream builds and continuous integration
+- Creating repositories for projects not yet in official Fedora repositories
+- Testing package changes before submitting to Fedora
+- Building packages for multiple distributions and versions
+- Collaborative package development with teams
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Multiple build sources" icon="code-branch">
+    Build from SRPMs, Git repositories, DistGit, PyPI, RubyGems, or custom scripts
+  </Card>
+  <Card title="Multi-distribution support" icon="server">
+    Build for Fedora, EPEL, and custom chroots with different architectures
+  </Card>
+  <Card title="Automated workflows" icon="robot">
+    Set up webhooks for GitHub, GitLab, Bitbucket, and Pagure to trigger builds automatically
+  </Card>
+  <Card title="Team collaboration" icon="users">
+    Share project access with team members and FAS groups
+  </Card>
+  <Card title="Repository management" icon="box">
+    Automatic repository creation with GPG signing and metadata generation
+  </Card>
+  <Card title="Build customization" icon="sliders">
+    Custom build dependencies, macros, and buildroot configurations
+  </Card>
+</CardGroup>
+
+## Build workflow
+
+The typical Copr build workflow follows these steps:
+
+<Steps>
+  <Step title="Create a project">
+    Set up a project with your desired build targets (chroots) and configuration
+  </Step>
+  <Step title="Submit a build">
+    Provide your source (SRPM, Git URL, etc.) to start the build process
+  </Step>
+  <Step title="Build execution">
+    Copr builds your package in isolated environments for each target
+  </Step>
+  <Step title="Repository creation">
+    Successfully built packages are automatically added to your project repository
+  </Step>
+  <Step title="Share and install">
+    Users can enable your repository and install packages with DNF
+  </Step>
+</Steps>
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get from zero to your first successful build in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install copr-cli and python-copr client library
+  </Card>
+  <Card title="Build sources" icon="code">
+    Learn about different ways to submit builds (SRPM, Git, PyPI, etc.)
+  </Card>
+  <Card title="API reference" icon="book" href="/api-reference">
+    Explore the Copr API and automation options
+  </Card>
+</CardGroup>
+
+## Public Copr instances
+
+While this documentation primarily focuses on the Fedora Copr instance, several public instances are available:
+
+- **[copr.fedorainfracloud.org](https://copr.fedorainfracloud.org)** - The default Fedora Copr instance
+- **[copr.stg.fedoraproject.org](https://copr.stg.fedoraproject.org)** - Staging instance for testing upcoming changes (data periodically deleted)
+- **[openEuler Copr](https://eur.openeuler.openatom.cn)** - Instance for the openEuler community
+
+## What you can build
+
+You can build any open-source software that:
+
+- Has a license included in the [Fedora allowed licenses list](https://docs.fedoraproject.org/en-US/legal/allowed-licenses)
+- Does not violate the [Fedora Code of Conduct](https://docs.fedoraproject.org/en-US/project/code-of-conduct/)
+- Complies with applicable laws and regulations
+
+<Info>
+Packages in Copr do **not** need to follow the [Fedora Packaging Guidelines](https://docs.fedoraproject.org/en-US/packaging-guidelines/), though following them is recommended. Kernel modules are allowed in Copr.
+</Info>
+
+## Is Copr safe to use?
+
+Copr is free software with publicly available source code. The service uses standard Fedora packaging toolsets, and repositories are GPG-signed. All Copr servers are deployed within Fedora infrastructure.
+
+Only people with FAS accounts can create projects and build packages. You can review each project owner's information and examine build sources, SRPMs, and spec files to verify trustworthiness.
+
+## Community and support
+
+- **Source code**: [github.com/fedora-copr/copr](https://github.com/fedora-copr/copr)
+- **Documentation**: [docs.pagure.org/copr.copr](https://docs.pagure.org/copr.copr/)
+- **Report bugs**: [Bugzilla](https://bugzilla.redhat.com/enter_bug.cgi?product=Copr)
+- **Security issues**: [GitHub Security](https://github.com/fedora-copr/copr/security)
+
+Ready to get started? Head over to the [quickstart guide](/quickstart) to build your first package.

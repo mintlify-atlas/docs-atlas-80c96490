@@ -1,0 +1,276 @@
+---
+title: Creating projects
+description: How to create and configure Copr projects
+---
+
+A Copr project is a repository that contains your built RPM packages. Before building any packages, you need to create a project and configure its settings.
+
+## Creating a new project
+
+You can create a Copr project through the web UI or using the command-line interface.
+
+<Tabs>
+  <Tab title="Web UI">
+    <Steps>
+      <Step title="Log in to Copr">
+        Visit [copr.fedorainfracloud.org](https://copr.fedorainfracloud.org/) and log in using your FAS (Fedora Account System) credentials.
+      </Step>
+      
+      <Step title="Navigate to create project">
+        Click on "New Project" in the navigation menu or your user dashboard.
+      </Step>
+      
+      <Step title="Configure project settings">
+        Fill in the required fields:
+        - **Name**: Your project name (letters, digits, underscores, dashes, and dots only)
+        - **Chroots**: Select the distributions and architectures to build for
+        - **Description**: Optional description of your project
+        - **Instructions**: Optional installation instructions for users
+      </Step>
+      
+      <Step title="Create the project">
+        Click "Create" to finalize your project.
+      </Step>
+    </Steps>
+  </Tab>
+  
+  <Tab title="CLI">
+    <Steps>
+      <Step title="Install copr-cli">
+        ```bash
+        sudo dnf install copr-cli
+        ```
+      </Step>
+      
+      <Step title="Configure API token">
+        1. Visit https://copr.fedorainfracloud.org/api/
+        2. Copy your API token
+        3. Save it to `~/.config/copr`
+      </Step>
+      
+      <Step title="Create your project">
+        ```bash
+        copr-cli create my-project --chroot fedora-rawhide-x86_64
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Project configuration options
+
+### Basic settings
+
+**Name**
+
+Must contain only letters, digits, underscores, dashes, and dots. Cannot be just a number.
+
+**Description**
+
+A brief description of your project that appears on the project overview page.
+
+**Instructions**
+
+Installation and usage instructions for end users. This appears on the project page.
+
+**Homepage**
+
+Optional URL to your project's homepage or documentation.
+
+**Contact**
+
+Optional email address or URL for users to contact you.
+
+### Build settings
+
+**Chroots**
+
+Select which operating systems and architectures to build for. You can select multiple chroots to build for different Fedora versions, EPEL, and other distributions.
+
+```bash
+copr-cli modify my-project --chroot fedora-39-x86_64 --chroot fedora-40-x86_64
+```
+
+**External repositories**
+
+Add additional yum repositories to be available during build time. Useful for dependencies not in Fedora/EPEL.
+
+```bash
+copr-cli modify my-project --repo https://example.com/repo/
+```
+
+You can also reference other Copr repositories:
+
+```bash
+copr-cli modify my-project --repo copr://user/another-project
+```
+
+**Runtime dependencies**
+
+Specify repositories that should be enabled when users install packages from your project, but not during builds.
+
+**Enable internet access during builds**
+
+By default, builds run without internet access. Enable this if your build process needs to download resources.
+
+```bash
+copr-cli modify my-project --enable-net on
+```
+
+<Warning>
+Enabling internet during builds can make builds non-reproducible and may introduce security risks.
+</Warning>
+
+### Advanced settings
+
+**Follow Fedora branching**
+
+When enabled, Copr automatically creates chroots for new Fedora releases as they branch from rawhide.
+
+**Multilib support**
+
+Allows users on 64-bit systems to install 32-bit packages from your repository.
+
+```bash
+copr-cli create my-project --multilib on
+```
+
+**Module hotfixes**
+
+Allows packages from your project to override packages from active module streams.
+
+```bash
+copr-cli modify my-project --module-hotfixes on
+```
+
+**Create repositories manually**
+
+Disable automatic repository metadata generation. Useful for large projects where you want to publish changes atomically.
+
+```bash
+copr-cli create my-project --disable-createrepo on
+```
+
+When enabled, build results go to an internal `devel/repodata` repository. Click "Regenerate Repositories" when ready to publish.
+
+<Note>
+This feature is also known as "devel mode" in the API.
+</Note>
+
+**Auto-prune**
+
+Automatically delete old builds. A build is deleted if there's a newer build (by version) and it's older than 14 days.
+
+**Delete after days**
+
+Automatically delete the entire project after a specified number of days. Useful for CI/CD or temporary testing projects.
+
+```bash
+copr-cli create my-project --delete-after-days 30
+```
+
+**Persistent**
+
+Protect the project and its builds from deletion. This option cannot be changed after project creation.
+
+```bash
+copr-cli create my-project --persistent on
+```
+
+**Fedora Review**
+
+Run the fedora-review tool automatically after builds to check compliance with Fedora Packaging Guidelines.
+
+```bash
+copr-cli create my-project --fedora-review on
+```
+
+**AppStream metadata**
+
+Generate AppStream metadata for your project. Note that this can slow down builds in large projects.
+
+```bash
+copr-cli modify my-project --appstream on
+```
+
+**Mock bootstrap**
+
+Configure how Mock initializes the build environment:
+- `default`: Use mock-core-configs.rpm configuration
+- `off`: Disable bootstrap
+- `on`: Enable bootstrap
+- `image`: Initialize with a pre-configured container image
+
+```bash
+copr-cli modify my-project --bootstrap on
+```
+
+**Build isolation**
+
+Choose the isolation method for running commands in buildroot:
+- `default`: Use mock-core-configs.rpm configuration
+- `nspawn`: Use systemd-nspawn (default for most cases)
+- `simple`: Use simple chroot
+
+```bash
+copr-cli modify my-project --isolation nspawn
+```
+
+**Repository priority**
+
+Set the priority of your repository (integer value). Lower numbers have higher priority.
+
+```bash
+copr-cli modify my-project --repo-priority 50
+```
+
+## Group projects
+
+You can create projects under a FAS group instead of your personal account.
+
+```bash
+copr-cli create @mygroup/project-name --chroot fedora-rawhide-x86_64
+```
+
+<Note>
+Group membership is managed through [FAS](https://accounts.fedoraproject.org). You need to log out and log back in to Copr after joining a group for the changes to take effect.
+</Note>
+
+## Custom chroots
+
+For distributions not officially supported by Copr, you can use custom chroots.
+
+<Steps>
+  <Step title="Enable custom chroot">
+    In your project settings, enable a custom chroot like `custom-1-x86_64`.
+  </Step>
+  
+  <Step title="Configure repositories">
+    Edit the chroot and specify repositories to enable:
+    ```
+    https://kojipkgs.fedoraproject.org/repos/rawhide/latest/x86_64/
+    ```
+  </Step>
+  
+  <Step title="Specify buildroot packages">
+    Specify packages to install in the minimal buildroot:
+    ```
+    @build
+    ```
+  </Step>
+</Steps>
+
+## Example: Complete project setup
+
+```bash
+# Create a new project with common settings
+copr-cli create my-awesome-app \
+  --chroot fedora-39-x86_64 \
+  --chroot fedora-40-x86_64 \
+  --chroot fedora-rawhide-x86_64 \
+  --description "My awesome application" \
+  --instructions "Run: dnf copr enable myuser/my-awesome-app" \
+  --enable-net off \
+  --multilib on \
+  --follow-fedora-branching on
+```

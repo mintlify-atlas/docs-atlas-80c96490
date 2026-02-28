@@ -1,0 +1,252 @@
+---
+title: System Architecture
+description: Understanding Copr's system architecture, components, and build process flow
+---
+
+## Overview
+
+Copr is a distributed build system consisting of multiple components that work together to build RPM packages and create repositories. The architecture separates concerns between task management (Frontend), task execution (Backend), and the actual build process (Builders).
+
+<Note>
+  The naming of "Frontend" and "Backend" in Copr can be confusing. **Frontend** is the management service (with its own backend/frontend logic), while **Backend** is the executing service that respects Frontend's wishes. This naming is historical and difficult to change at this stage.
+</Note>
+
+## Core Components
+
+### Frontend
+
+The **Frontend** component is the main entry point for users and consists of:
+
+- PostgreSQL database for storing projects, builds, and task queues
+- Web server providing the Web UI and REST API
+- Task queue management
+- User authentication and authorization
+
+**Port**: 5000 (in Docker environment)
+
+**Key Responsibilities**:
+- Accept build requests from users via Web UI or API
+- Manage project and package metadata
+- Generate build tasks and maintain task queues
+- Track build status and results
+
+### Backend
+
+The **Backend** executes tasks from the Frontend and orchestrates the build process. It consists of multiple services:
+
+- **backend-build**: Dispatcher for build tasks
+- **backend-action**: Dispatcher for action tasks (delete, create repo, etc.)
+- **backend-log**: Logging service using Redis
+- **backend_httpd**: HTTP server serving build results
+
+**Port**: 5002 (Nginx serving results)
+
+**Key Responsibilities**:
+- Poll Frontend's task queue and prioritize tasks
+- Request builder machines from Resalloc
+- Execute builds on remote builders via SSH
+- Manage build results and RPM repositories
+- Run `createrepo_c` to generate RPM metadata
+
+### DistGit
+
+**DistGit** acts as a proxy source storage and cache for build sources.
+
+**Port**: 5001 (Apache HTTP server)
+
+**Key Responsibilities**:
+- Cache source RPMs to avoid repeatedly downloading/processing sources
+- Provide build reproducibility (complete package build specification)
+- Prevent DoS attacks on upstream source code providers
+- Import SRPMs from Backend and extract sources
+
+**Why DistGit?**
+Obtaining sources for an RPM build can be expensive (git clones with submodules, autotools automation, tarball downloads). DistGit caches these sources so multiple builders can quickly access them.
+
+### Keygen
+
+The **Keygen** service manages GPG key-pairs for signing RPMs.
+
+**Port**: 5003 (Apache, internal only)
+
+**Components**:
+- **keygen-signd**: Signing daemon using `obs-signd` protocol
+- **keygen-httpd**: HTTP interface for key distribution
+
+**Key Responsibilities**:
+- Store GPG private keys securely
+- Sign RPMs on behalf of users without exposing private keys
+- Distribute public keys to users
+
+### Builders
+
+The **Builders** are ephemeral, dynamically allocated machines that perform the actual package building.
+
+**Key Responsibilities**:
+- Execute `copr-rpmbuild` to build packages
+- Download sources from DistGit
+- Generate source RPMs or binary RPMs
+- Run in isolated, expendable environments
+
+**Characteristics**:
+- Heterogeneous fleet (different clouds, hypervisors, architectures)
+- Tagged by capabilities (e.g., `architecture_x86_64`, `osuosl_datacenter`)
+- Managed via SSH from Backend workers
+
+### Resalloc
+
+**Resalloc** provides resource allocation abstraction for managing the builder pool.
+
+**Port**: 5005 (Web UI)
+
+**Key Responsibilities**:
+- Allocate and deallocate builder machines
+- Manage resource pools across different providers
+- Handle resource tagging and matching
+- Track resource usage and quotas
+
+### Supporting Services
+
+**Redis**: Message queue and caching for backend logging
+
+**PostgreSQL**: Primary database for Frontend and Resalloc
+
+**Pulp** (optional): Content repository management (port 5006)
+
+## Build Process Flow
+
+Here's the complete flow of how a build progresses through the Copr system:
+
+<Steps>
+  <Step title="User submits build request">
+    Using the Web UI or API, a user requests a new build. This creates a **build task** in the Frontend database with source specifications (where to get sources and how to process them).
+  </Step>
+
+  <Step title="Backend polls task queue">
+    Backend polls the Frontend's task queue and transforms it into its own priority queue. Based on system quotas (user limits, architecture availability, etc.), it selects a source RPM task and starts a background **Worker** process.
+  </Step>
+
+  <Step title="Worker requests builder machine">
+    The Worker process requests a machine from **Resalloc** by taking a ticket for a builder to perform the source build.
+  </Step>
+
+  <Step title="Source RPM build">
+    Over SSH, the Worker runs the build on the remote **Builder** machine. The Builder downloads and processes sources (using `copr-rpmbuild`) to generate a source RPM (SRPM).
+  </Step>
+
+  <Step title="Collect sources and release builder">
+    Once the builder finishes successfully, the Worker:
+    - Collects the generated SRPM
+    - Releases the builder (closes the Resalloc ticket)
+    - Optionally requests GPG signature from Keygen
+  </Step>
+
+  <Step title="Report to Frontend">
+    Backend reports the task status back to Frontend. If successful, Frontend generates a new **SRPM import task** for DistGit.
+  </Step>
+
+  <Step title="DistGit imports SRPM">
+    DistGit polls its task queue, downloads the SRPM, and caches the sources in its database. It reports the import status back to Frontend.
+  </Step>
+
+  <Step title="RPM build task explosion">
+    Upon successful import, Frontend generates multiple **RPM build tasks** - one for each selected build root (e.g., `fedora-rawhide-x86_64`, `epel-8-x86_64`).
+  </Step>
+
+  <Step title="Backend processes RPM builds">
+    Backend takes RPM build tasks according to its priorities and spawns background Workers (multiple Workers run concurrently for different chroots).
+  </Step>
+
+  <Step title="Request architecture-specific builder">
+    Each Worker requests an appropriate builder machine from Resalloc with the correct architecture tag (e.g., `arch_x86_64`).
+  </Step>
+
+  <Step title="Binary RPM build">
+    The Worker executes the build on the Builder via SSH. The Builder:
+    - Downloads source RPM from DistGit (fast, local cache)
+    - Builds binary RPM(s) using `mock` or similar tools
+    - Returns results to the Worker
+  </Step>
+
+  <Step title="Sign and publish">
+    The Worker on Backend:
+    - Downloads RPM build results
+    - Requests Keygen to sign the RPMs
+    - Places RPMs into the repository structure
+    - Runs `createrepo_c` to generate repository metadata
+    - Reports final status to Frontend
+  </Step>
+
+  <Step title="Build complete">
+    The user can now enable and use the repository:
+    ```bash
+    dnf copr enable <project>
+    dnf install <package>
+    ```
+  </Step>
+</Steps>
+
+## Data Flow
+
+```
+User → Frontend (API/WebUI)
+         ↓
+      Database (task queue)
+         ↓
+      Backend (polls tasks)
+         ↓
+      Resalloc (allocate builder)
+         ↓
+      Builder (build SRPM) → Backend → DistGit (import)
+         ↓                                  ↓
+      Frontend (generate RPM tasks)  ←─────┘
+         ↓
+      Backend (polls RPM tasks)
+         ↓
+      Resalloc (allocate builders)
+         ↓
+      Builder (build RPMs) ← DistGit (sources)
+         ↓
+      Backend → Keygen (sign RPMs)
+         ↓
+      Backend (createrepo_c)
+         ↓
+      User (dnf install)
+```
+
+## Communication Patterns
+
+- **Frontend ↔ Backend**: Backend polls Frontend's database for tasks
+- **Backend ↔ Builder**: SSH connections for remote execution
+- **Backend ↔ Resalloc**: Ticket-based resource allocation
+- **Backend ↔ Keygen**: `obs-signd` protocol for signing
+- **Builder ↔ DistGit**: HTTP downloads of cached sources
+- **Builder ↔ Outside World**: Downloads from GitHub, GitLab, Pagure, etc.
+
+## Docker Compose Port Layout
+
+When running Copr locally with Docker Compose, the following ports are exposed:
+
+| Service | Host Port | Container Port | Description |
+|---------|-----------|----------------|-------------|
+| Frontend | 5000 | 5000 | Web UI and API |
+| DistGit | 5001 | 5001 | DistGit HTTP server |
+| Backend | 5002 | 5002 | Build results (Nginx) |
+| Keygen | - | 5003 | Internal only |
+| Resalloc | 5005 | 5000 | Resalloc Web UI |
+| Pulp | 5006 | 80 | Pulp content management |
+| Database | 5009 | 5432 | PostgreSQL |
+
+## Scalability Considerations
+
+- **Horizontal**: Multiple Backend workers can run concurrently
+- **Heterogeneous builders**: Different architectures and cloud providers
+- **Caching**: DistGit prevents redundant source downloads
+- **Quotas**: System manages resource allocation per user/project
+- **Ephemeral builders**: Machines are allocated and deallocated dynamically
+
+## Related Resources
+
+- [Backend Actions](/development/backend-actions) - Detailed backend operations
+- [Worker Manager](/development/worker-manager) - Worker process management
+- [Dispatchers](/development/dispatchers) - Task dispatching logic

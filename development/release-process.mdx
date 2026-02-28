@@ -1,0 +1,533 @@
+---
+title: Release Process
+description: How Copr packages are released, tested, and deployed to production
+---
+
+This guide documents the complete Copr release process, from tagging packages to deploying them in Fedora infrastructure.
+
+## Overview
+
+Copr uses a structured release workflow that includes:
+
+1. **Pre-release**: Tag packages, build in @copr/copr, upgrade dev instances, test
+2. **Build for production**: Submit to Fedora/EPEL and infra repos
+3. **Release window**: Upgrade production infrastructure
+4. **Post-release**: Documentation, announcements, Bodhi updates
+
+<Note>
+Read through this entire guide before starting a release. You may want to adjust the order of some steps.
+</Note>
+
+## Pre-Release
+
+The goal is to do as much work as possible before the release while focusing only on important tasks.
+
+### Tag Untagged Packages
+
+Ensure you're on an up-to-date main branch:
+
+```bash
+git checkout main
+git pull --rebase
+```
+
+Find packages with untagged commits:
+
+```bash
+tito report --untagged-commits
+```
+
+Check for packages with `.PATCH` versions:
+
+```bash
+find -maxdepth 2 -name *.spec | xargs grep "Version:" | grep -E '[0-9]+\.[0-9]+\.[0-9]+'
+```
+
+Tag packages:
+
+```bash
+# For packages with .PATCH version, manually bump to X.Y
+cd <package-dir>
+tito tag --use-version X.Y
+
+# For other packages, auto-bump version
+cd <package-dir>
+tito tag
+```
+
+<Warning>
+Clean up changelogs before tagging. Remove prefixes like `frontend:`, `rpmbuild:` and filter out entries not interesting to end-users. Git log is not the same as changelog!
+</Warning>
+
+Push all new tags:
+
+```bash
+git push --follow-tags origin
+```
+
+### Build Packages
+
+Build updated packages into the `@copr/copr` project:
+
+```bash
+copr build-package @copr/copr --nowait --name python-copr
+copr build-package @copr/copr --nowait --name copr-frontend
+copr build-package @copr/copr --nowait --name copr-backend
+copr build-package @copr/copr --nowait --name copr-cli
+copr build-package @copr/copr --nowait --name copr-dist-git
+copr build-package @copr/copr --nowait --name copr-keygen
+copr build-package @copr/copr --nowait --name copr-rpmbuild
+copr build-package @copr/copr --nowait --name copr-selinux
+copr build-package @copr/copr --nowait --name copr-messaging
+```
+
+### Upgrade Development Machines
+
+Verify `.repo` files point to `@copr/copr`.
+
+On batcave01.iad2.fedoraproject.org:
+
+```bash
+# Backend
+sudo rbac-playbook -l copr-be-dev.aws.fedoraproject.org \
+    manual/copr/copr-backend-upgrade.yml
+sudo rbac-playbook -l copr-be-dev.aws.fedoraproject.org \
+    groups/copr-backend.yml
+
+# Keygen
+sudo rbac-playbook -l copr-keygen-dev.aws.fedoraproject.org \
+    manual/copr/copr-keygen-upgrade.yml
+sudo rbac-playbook -l copr-keygen-dev.aws.fedoraproject.org \
+    groups/copr-keygen.yml
+
+# Frontend
+sudo rbac-playbook -l copr-fe-dev.aws.fedoraproject.org \
+    manual/copr/copr-frontend-upgrade.yml
+sudo rbac-playbook -l copr-fe-dev.aws.fedoraproject.org \
+    groups/copr-frontend.yml
+
+# DistGit
+sudo rbac-playbook -l copr-dist-git-dev.aws.fedoraproject.org \
+    manual/copr/copr-dist-git-upgrade.yml
+sudo rbac-playbook -l copr-dist-git-dev.aws.fedoraproject.org \
+    groups/copr-dist-git.yml
+```
+
+<Note>
+If there's a new copr-rpmbuild version, terminate resalloc VMs so they're recreated with the new version.
+</Note>
+
+Verify installed versions:
+
+```bash
+./releng/run-on-all-infra --devel 'rpm -qa | grep copr'
+```
+
+### Call for QA
+
+Move [MODIFIED+ bugzillas](https://bugzilla.redhat.com/buglist.cgi?bug_status=POST&bug_status=MODIFIED&product=Copr) to ON_QA.
+
+Ask the team to test and verify bugs.
+
+### Run Tests
+
+Execute sanity tests from a Podman container:
+
+```bash
+# See documentation for detailed test execution
+./beaker-tests/Sanity/copr-cli-basic-operations/runtest.sh
+```
+
+### Build Packages for Production
+
+Ensure you're a co-maintainer of these Fedora packages:
+
+- copr-backend
+- copr-cli
+- copr-dist-git
+- copr-frontend
+- copr-keygen
+- copr-messaging
+- copr-mocks
+- copr-rpmbuild
+- copr-selinux
+- python-copr
+- python-copr-common
+
+Ensure `.tito/releasers.conf` has up-to-date branch list.
+
+Release each package:
+
+```bash
+cd <package-subdir>
+
+# For python-copr and copr-cli
+tito release fedora-git-clients
+
+# For python-copr-common, copr-messaging, copr-rpmbuild
+tito release fedora-git-common
+
+# For server packages (copr-frontend, copr-backend, etc.)
+tito release fedora-git
+```
+
+<Warning>
+Koji doesn't automatically add successful builds to the buildroot. Create Bodhi overrides for dependencies to prevent build failures:
+</Warning>
+
+```bash
+sudo dnf install python3-fedora-distro-aliases
+cd copr-cli
+for i in $(/usr/bin/resolve-fedora-aliases fedora-branched epel-all -o branch); do
+    git checkout $i
+    git pull
+    fedpkg override create --duration 1 --notes "Copr Release"
+done
+```
+
+Wait for overrides to be available:
+
+```bash
+# Fedora
+for ver in 38 39 40 41; do
+    koji wait-repo f$ver-build --build=python-copr-common-0.22-1.fc$ver || echo ERROR $ver
+done
+
+# EPEL
+for ver in 8 9; do
+    koji wait-repo epel$ver-build --build=python-copr-common-0.22-1.el$ver || echo ERROR $ver
+done
+```
+
+<Warning>
+Tito has a bug with multiple sources. When releasing copr-backend, it removes `test-data-copr-backend-2.tar.gz` from DistGit sources. You need to [manually fix this](https://src.fedoraproject.org/rpms/copr-backend/c/65e663d23e5caaac01123bf8c0fc0e636fd08ee3).
+</Warning>
+
+### Submit Packages to Staging Infra Tags
+
+<Warning>
+There's a long-term race condition in Koji. Submit all packages except one at once. Keep one package to submit later to "poke through" a potentially broken repository.
+</Warning>
+
+Tag packages for staging:
+
+```bash
+./releng/koji-infratag-staging copr-rpmbuild-0.53-1.fc34
+```
+
+Wait for packages to be available:
+
+```bash
+./releng/koji-infratag-available --stg --wait copr-rpmbuild-0.53-1.fc34.x86_64.rpm
+```
+
+Don't forget `python-copr` and `copr-cli` (used on backend).
+
+### Prepare Release Notes
+
+Review resolved bugs and write release notes. See [previous release notes](/blog) for formatting.
+
+Create a pull request with release notes.
+
+### Schedule and Announce Outage
+
+See [Announcing Outages](/development/maintenance#announcing-outages).
+
+Create infrastructure ticket and announce planned maintenance:
+
+- Update status.fedoraproject.org
+- Email copr-devel@lists.fedorahosted.org
+- Coordinate with Fedora Infrastructure team
+
+## Release Window
+
+<Note>
+If pre-release preparation was thorough, the release window should take less than 10 minutes.
+</Note>
+
+### Announce Ongoing Outage
+
+Update status.fedoraproject.org to "Ongoing outage."
+
+### Move Packages to Production Infra Tags
+
+<Warning>
+Remember the Koji race! Delay moving one NVR to poke through the repo.
+</Warning>
+
+Move packages to production:
+
+```bash
+./releng/koji-infratag-move-prod copr-rpmbuild-0.53-1.fc34 ...
+```
+
+<Warning>
+Production builders automatically install copr-rpmbuild from production infra repo. Tag this package during the outage window when it's safe (old infra may be incompatible with new rpmbuild).
+</Warning>
+
+Wait for availability:
+
+```bash
+./releng/koji-infratag-available --prod --wait copr-rpmbuild-0.53-1.fc34.x86_64.rpm ...
+```
+
+Or check manually:
+https://kojipkgs.fedoraproject.org/repos-dist/f35-infra/latest/x86_64/
+
+### Upgrade Production Machines
+
+<Warning>
+Stop copr-backend.target before upgrading to avoid incompatible package versions causing build failures.
+</Warning>
+
+On batcave01.iad2.fedoraproject.org:
+
+```bash
+# Backend
+sudo rbac-playbook -l copr-be.aws.fedoraproject.org \
+    manual/copr/copr-backend-upgrade.yml
+sudo rbac-playbook -l copr-be.aws.fedoraproject.org \
+    groups/copr-backend.yml
+
+# Keygen
+sudo rbac-playbook -l copr-keygen.aws.fedoraproject.org \
+    manual/copr/copr-keygen-upgrade.yml
+sudo rbac-playbook -l copr-keygen.aws.fedoraproject.org \
+    groups/copr-keygen.yml
+
+# Frontend
+sudo rbac-playbook -l copr-fe.aws.fedoraproject.org \
+    manual/copr/copr-frontend-upgrade.yml
+sudo rbac-playbook -l copr-fe.aws.fedoraproject.org \
+    groups/copr-frontend.yml
+
+# DistGit
+sudo rbac-playbook -l copr-dist-git.aws.fedoraproject.org \
+    manual/copr/copr-dist-git-upgrade.yml
+sudo rbac-playbook -l copr-dist-git.aws.fedoraproject.org \
+    groups/copr-dist-git.yml
+```
+
+<Note>
+Playbooks handle database upgrades automatically.
+</Note>
+
+Verify versions:
+
+```bash
+./releng/run-on-all-infra 'rpm -qa | grep copr'
+```
+
+Check no unexpected updates are available:
+
+```bash
+./releng/run-on-all-infra 'dnf copr list'
+```
+
+### Test Production
+
+Run post-release Beaker test:
+
+```bash
+cd /root/copr/beaker-tests/Sanity/copr-cli-basic-operations/
+./runtest-production.sh
+```
+
+Or submit a test build and verify it succeeds.
+
+## Post-Release
+
+At this point, all Copr services should be up and running.
+
+### Generate Documentation
+
+Update Copr project documentation:
+
+```bash
+cd doc
+./update_docs.sh
+```
+
+Trigger ReadTheDocs builds:
+
+- https://readthedocs.org/projects/copr-backend/
+- https://readthedocs.org/projects/copr-keygen/
+- https://readthedocs.org/projects/copr-messaging/
+- https://readthedocs.org/projects/python-copr/
+
+Click "Build" for each project.
+
+If schema was modified, regenerate schema documentation.
+
+### Announce End of Release
+
+Update status.fedoraproject.org to "Resolved."
+
+Email copr-devel@lists.fedorahosted.org with:
+- Summary of changes
+- Link to release notes
+- Any known issues
+
+### Release Packages to PyPI
+
+Ensure `~/.pypirc` is configured correctly:
+
+```bash
+dnf install twine
+cd <package-dir>
+python3 setup.py sdist
+twine upload dist/<NAME-VERSION>.tar.gz
+```
+
+Release these packages:
+- copr-common
+- python-copr
+- copr-cli
+- copr-messaging
+
+<Note>
+If you don't have PyPI access, ask @msuchy, @praiskup, or @frostyx.
+</Note>
+
+### Submit Bodhi Updates
+
+Create updates in [Bodhi](https://bodhi.fedoraproject.org/) for every package built in Koji.
+
+Group packages into batches:
+
+```bash
+fedpkg update
+```
+
+Template:
+
+```
+[ copr-backend-1.127-1.fc31, copr-frontend-1.154-1.fc31]
+type=enhancement
+notes=copr-frontend
+
+    - change 1 in frontend
+    - change 2 in frontend
+
+    copr-backend
+
+    - change 1 in backend
+    - change 2 in backend
+```
+
+<Note>
+Use filtered %changelog entries from the RPM packages for update notes.
+</Note>
+
+### Final Steps
+
+Check [MODIFIED bugs](https://bugzilla.redhat.com/buglist.cgi?bug_status=POST&bug_status=MODIFIED&classification=Community&list_id=4678039&product=Copr&query_format=advanced) not yet ON_QA and move them if fixed in this release.
+
+Close all [ON_QA, VERIFIED, and RELEASE_PENDING bugs](https://bugzilla.redhat.com/buglist.cgi?bug_status=ON_QA&bug_status=VERIFIED&bug_status=RELEASE_PENDING&classification=Community&list_id=4678045&product=Copr&query_format=advanced) to CLOSED/CURRENTRELEASE with comment:
+
+> New Copr has been released.
+
+Update this document if you found issues or improvements during the release.
+
+## Release Checklist
+
+Use this checklist to track progress:
+
+### Pre-Release
+
+- [ ] Tag all packages with untagged commits
+- [ ] Build packages in @copr/copr
+- [ ] Upgrade dev instances
+- [ ] Run sanity tests
+- [ ] Build packages for Fedora/EPEL
+- [ ] Create Bodhi overrides for dependencies
+- [ ] Wait for overrides to be available in buildroot
+- [ ] Submit packages to staging infra tags
+- [ ] Prepare release notes
+- [ ] Schedule and announce outage
+
+### Release Window
+
+- [ ] Announce ongoing outage
+- [ ] Move packages to production infra tags
+- [ ] Wait for packages to be available
+- [ ] Upgrade production backend
+- [ ] Upgrade production keygen
+- [ ] Upgrade production frontend
+- [ ] Upgrade production distgit
+- [ ] Verify installed versions
+- [ ] Run post-release tests
+
+### Post-Release
+
+- [ ] Generate documentation
+- [ ] Trigger ReadTheDocs builds
+- [ ] Announce end of release
+- [ ] Release packages to PyPI
+- [ ] Submit Bodhi updates
+- [ ] Close resolved bugs
+- [ ] Update release documentation
+
+## Common Issues
+
+### Build Failures in Koji
+
+**Problem**: Package fails to build due to missing dependency.
+
+**Solution**: Create Bodhi override for the dependency and wait for it to be available in the buildroot.
+
+### Playbook Fails During Upgrade
+
+**Problem**: Ansible playbook fails midway through upgrade.
+
+**Solution**: Debug the specific task, fix the issue, and rerun the playbook. Playbooks are generally idempotent.
+
+### Database Migration Fails
+
+**Problem**: Alembic migration fails on frontend.
+
+**Solution**: 
+1. Check `/var/log/httpd/error_log` for details
+2. Manually run migration: `cd /usr/share/copr/coprs_frontend && alembic upgrade head`
+3. Fix issues and rerun playbook
+
+### Packages Not Available in Infra Repo
+
+**Problem**: `koji-infratag-available` times out.
+
+**Solution**: Check repo manually and investigate Koji issues. The Koji race might have broken the repo - submit the held-back package to fix.
+
+## Copr Packages
+
+Copr consists of these packages:
+
+| Package | Purpose | Release Target |
+|---------|---------|----------------|
+| **python-copr** | Python client library | Fedora, EPEL, PyPI |
+| **python-copr-common** | Shared code | Fedora, EPEL, PyPI |
+| **copr-cli** | Command-line client | Fedora, EPEL, PyPI |
+| **copr-frontend** | Web application | Fedora, EPEL, Infra |
+| **copr-backend** | Build dispatcher | Fedora, EPEL, Infra |
+| **copr-dist-git** | DistGit service | Fedora, EPEL, Infra |
+| **copr-keygen** | GPG signing service | Fedora, EPEL, Infra |
+| **copr-rpmbuild** | Builder agent | Fedora, EPEL, Infra |
+| **copr-messaging** | Message bus library | Fedora, EPEL, PyPI |
+| **copr-selinux** | SELinux policies | Fedora, EPEL, Infra |
+| **copr-mocks** | Mock configs | Fedora, EPEL, Infra |
+
+## Additional Resources
+
+<CardGroup cols={2}>
+  <Card title="Deployment" icon="server" href="/development/deployment">
+    Learn how to deploy Copr in different environments
+  </Card>
+  <Card title="Maintenance" icon="wrench" href="/development/maintenance">
+    Backup, monitoring, and operations guide
+  </Card>
+  <Card title="Fedora Infra Ansible" icon="code" href="https://pagure.io/fedora-infra/ansible">
+    Fedora Infrastructure Ansible playbooks
+  </Card>
+  <Card title="Release Notes" icon="note" href="/blog">
+    Read previous Copr release notes
+  </Card>
+</CardGroup>

@@ -1,0 +1,454 @@
+---
+title: Managing repositories
+description: Managing build repositories, chroots, and repository settings
+---
+
+Copr automatically creates and maintains RPM repositories for your builds. This guide covers how to manage repositories and chroots for your projects.
+
+## Understanding Copr repositories
+
+Each Copr project has one repository per enabled chroot. For example, a project with `fedora-39-x86_64` and `fedora-40-x86_64` chroots will have two separate repositories.
+
+### Repository structure
+
+Repositories are organized as:
+
+```
+https://download.copr.fedorainfracloud.org/results/
+  <owner>/
+    <project>/
+      <chroot>/
+        *.rpm
+        repodata/
+```
+
+For example:
+```
+https://download.copr.fedorainfracloud.org/results/
+  @copr/
+    copr-dev/
+      fedora-39-x86_64/
+      fedora-40-x86_64/
+```
+
+## Managing chroots
+
+### Enabling chroots
+
+Enable chroots when creating a project:
+
+```bash
+copr-cli create my-project \
+  --chroot fedora-39-x86_64 \
+  --chroot fedora-40-x86_64 \
+  --chroot fedora-rawhide-x86_64
+```
+
+Or add chroots to an existing project:
+
+```bash
+copr-cli modify my-project \
+  --chroot fedora-41-x86_64
+```
+
+### Available chroots
+
+View all available chroots:
+
+```bash
+copr-cli list-chroots
+```
+
+Common chroots include:
+- Fedora: `fedora-{39,40,41,rawhide}-{x86_64,aarch64,ppc64le,s390x}`
+- EPEL: `epel-{7,8,9}-{x86_64,aarch64,ppc64le,s390x}`
+- CentOS Stream: `centos-stream-{8,9,10}-{x86_64,aarch64,ppc64le,s390x}`
+- openSUSE: `opensuse-leap-{15.5,15.6}-x86_64`, `opensuse-tumbleweed-x86_64`
+
+### Per-chroot configuration
+
+Each chroot can have custom settings that override project-level defaults.
+
+<Tabs>
+  <Tab title="Web UI">
+    <Steps>
+      <Step title="Navigate to project settings">
+        Go to your project page and click the "Settings" tab.
+      </Step>
+      
+      <Step title="Find the chroot">
+        Scroll to the "Chroots" section and find the chroot you want to configure.
+      </Step>
+      
+      <Step title="Click Edit">
+        Click the "Edit" button next to the chroot name.
+      </Step>
+      
+      <Step title="Configure settings">
+        Modify chroot-specific settings like packages, modules, or repositories.
+      </Step>
+    </Steps>
+  </Tab>
+  
+  <Tab title="CLI">
+    ```bash
+    copr-cli edit-chroot my-project/fedora-39-x86_64 \
+      --packages "extra-package" \
+      --repos "https://example.com/repo/"
+    ```
+  </Tab>
+</Tabs>
+
+#### Chroot-specific options
+
+**Additional packages**
+
+Install extra packages in the buildroot:
+
+```bash
+copr-cli edit-chroot my-project/fedora-39-x86_64 \
+  --packages "cmake ninja-build"
+```
+
+**Additional repositories**
+
+Enable extra repositories during builds:
+
+```bash
+copr-cli edit-chroot my-project/fedora-39-x86_64 \
+  --repos "https://example.com/repo/"
+```
+
+**Module enable/disable**
+
+Enable or disable modules in the buildroot:
+
+```bash
+copr-cli edit-chroot my-project/fedora-39-x86_64 \
+  --module-toggle "nodejs:18, postgresql:15"
+```
+
+Format: `module_name:stream`. Disable a module with `-module_name:stream`.
+
+**Bootstrap configuration**
+
+Override project-level bootstrap settings:
+
+```bash
+copr-cli edit-chroot my-project/fedora-39-x86_64 \
+  --bootstrap image
+```
+
+Options: `default`, `on`, `off`, `image`, `custom_image`, `unchanged`
+
+**Isolation method**
+
+Override isolation settings:
+
+```bash
+copr-cli edit-chroot my-project/fedora-39-x86_64 \
+  --isolation nspawn
+```
+
+Options: `default`, `nspawn`, `simple`, `unchanged`
+
+## Automatic repository creation
+
+By default, Copr automatically updates repository metadata after each successful build. This makes new packages immediately available to users.
+
+### How it works
+
+1. Build completes successfully
+2. RPMs are added to the repository directory
+3. `createrepo_c` runs to update metadata
+4. Repository is immediately available to users
+
+## Manual repository creation
+
+For large projects with many packages (like KDE or GNOME stacks), you may want to control when repository metadata is published.
+
+### Enabling manual mode
+
+```bash
+copr-cli create my-project \
+  --chroot fedora-rawhide-x86_64 \
+  --disable-createrepo on
+```
+
+Or for existing projects:
+
+```bash
+copr-cli modify my-project --disable-createrepo on
+```
+
+<Note>
+In the API, this feature is called `devel_mode`. In the web UI, it's the "Create repositories manually" checkbox.
+</Note>
+
+### How manual mode works
+
+1. Build completes successfully
+2. RPMs are added to an internal `devel/repodata` directory
+3. This development repository is enabled for subsequent builds but **not visible to users**
+4. You manually regenerate repositories when ready to publish
+
+### Regenerating repositories
+
+<Tabs>
+  <Tab title="Web UI">
+    Click the "Regenerate Repositories" button on your project overview page.
+  </Tab>
+  
+  <Tab title="CLI">
+    ```bash
+    copr-cli regenerate-repos my-project
+    ```
+  </Tab>
+</Tabs>
+
+This atomically moves your repository from one consistent state to another.
+
+### Use cases for manual mode
+
+- **Large software stacks**: Build hundreds of packages, then publish them all at once
+- **Coordinated releases**: Ensure all packages are built before users can install them
+- **Testing**: Test the development repository before making it public
+- **Atomic updates**: Prevent users from seeing partially-updated package sets
+
+<Warning>
+Builds in `devel/repodata` can see each other as dependencies, but users cannot install them until you regenerate repositories.
+</Warning>
+
+## Repository metadata
+
+### AppStream metadata
+
+AppStream metadata enables software centers to display your applications.
+
+```bash
+copr-cli modify my-project --appstream on
+```
+
+<Note>
+Generating AppStream metadata slows down builds in large projects. Disable it if you don't need it.
+</Note>
+
+### GPG signing
+
+All packages in Copr repositories are automatically signed with the Copr signing key.
+
+The GPG key is included in the repository configuration file and is automatically imported when users enable your repository.
+
+## Multilib repositories
+
+Multilib allows users on 64-bit systems to install 32-bit packages.
+
+### Enabling multilib
+
+```bash
+copr-cli create my-project \
+  --chroot fedora-39-x86_64 \
+  --chroot fedora-39-i386 \
+  --multilib on
+```
+
+### How multilib works
+
+1. Enable both 64-bit and 32-bit chroots (e.g., `fedora-39-x86_64` and `fedora-39-i386`)
+2. Set `--multilib on`
+3. Users get special multilib-enabled repository files
+4. Both 32-bit and 64-bit packages are available concurrently
+
+### Multilib repository file example
+
+```ini
+[copr:copr.fedorainfracloud.org:user:project]
+name=Copr repo for project owned by user
+baseurl=http://copr-be.cloud.fedoraproject.org/results/user/project/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/user/project/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+
+[copr:copr.fedorainfracloud.org:user:project:ml]
+name=Copr repo for project owned by user (i386)
+baseurl=http://copr-be.cloud.fedoraproject.org/results/user/project/fedora-$releasever-i386/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/user/project/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+cost=1100
+```
+
+## Module repositories
+
+Copr supports Fedora Modularity features.
+
+### Module hotfixes
+
+Allow non-module packages to override module packages:
+
+```bash
+copr-cli modify my-project --module-hotfixes on
+```
+
+This sets `module_hotfixes=1` in repository files.
+
+### Building modules
+
+See the [modularity documentation](http://frostyx.cz/posts/how-to-build-modules-in-copr) for details on building module streams.
+
+## Repository priority
+
+Set repository priority to control package preference:
+
+```bash
+copr-cli modify my-project --repo-priority 50
+```
+
+Lower numbers have higher priority. This is useful when you want your packages to take precedence over distribution packages.
+
+<Note>
+It's recommended to bump the release number instead of relying on repository priority.
+</Note>
+
+## Subprojects (CoprDirs)
+
+Create isolated sub-repositories within a single project.
+
+### Creating subprojects
+
+Subprojects are created automatically when you submit builds to them:
+
+```bash
+copr-cli build my-project:custom:feature-x package.src.rpm
+copr-cli build my-project:pr:123 package.src.rpm
+```
+
+### Subproject naming
+
+Subproject names must follow this format:
+- Start with the project name
+- Followed by `:custom:` or `:pr:`
+- Followed by a suffix
+
+Examples:
+- `my-project:custom:testing`
+- `my-project:custom:staging`  
+- `my-project:pr:42`
+
+### Subproject isolation
+
+- Subproject builds can see packages from:
+  - Their own subproject repository
+  - The main project repository
+- Subproject builds **cannot** see packages from other subprojects
+- `:pr:` subprojects are automatically deleted after 40 days of inactivity
+
+### Enabling subprojects
+
+```bash
+dnf copr enable user/my-project:custom:testing
+```
+
+## Custom repositories in buildroot
+
+Add external repositories to be available during builds.
+
+### Project-level repositories
+
+```bash
+copr-cli modify my-project \
+  --repo "https://example.com/repo/" \
+  --repo "copr://user/another-project"
+```
+
+### Chroot-level repositories
+
+```bash
+copr-cli edit-chroot my-project/fedora-39-x86_64 \
+  --repos "https://example.com/repo/"
+```
+
+### Repository URL formats
+
+**HTTP/HTTPS URLs**
+```
+https://example.com/repo/
+```
+
+**Copr repositories**
+```
+copr://user/project
+copr://@group/project
+```
+
+## Repository caching
+
+Fedora Copr uses AWS CDN to distribute repositories globally. This can cause caching issues.
+
+### Caching behavior
+
+- Repository metadata may be cached for several minutes
+- Directory listings may show outdated contents
+- DNF/YUM always gets the latest metadata
+- Web browsers may show stale directory listings
+
+### Viewing non-cached content
+
+Access the non-cached backend directly:
+
+```
+http://copr-be.cloud.fedoraproject.org/results/
+```
+
+<Note>
+Caching doesn't affect package manager behavior - only web browser directory listings.
+</Note>
+
+## Repository access
+
+### Public repositories
+
+All Copr repositories are publicly accessible by default. Anyone can:
+- View the project page
+- Enable the repository
+- Install packages
+
+### Unlisted projects
+
+Hide your project from the homepage:
+
+```bash
+copr-cli modify my-project --unlisted-on-hp on
+```
+
+The project is still public and accessible via direct URL, but doesn't appear in searches or the homepage.
+
+## Deleting repositories
+
+Deleting a project removes all its repositories and builds.
+
+```bash
+copr-cli delete my-project
+```
+
+<Warning>
+This action is irreversible unless the project is marked as persistent.
+</Warning>
+
+### Persistent projects
+
+Protect projects from deletion:
+
+```bash
+copr-cli create my-project --persistent on
+```
+
+Persistent projects and their builds cannot be deleted by any means. This option cannot be changed after creation.

@@ -1,0 +1,719 @@
+---
+title: Maintenance and Operations
+description: Backup, recovery, monitoring, and routine maintenance tasks for Copr
+---
+
+This guide covers essential maintenance operations for running a Copr instance, including backups, monitoring, upgrades, and routine tasks.
+
+## Backup and Recovery
+
+### Backend Storage Backups
+
+The backend uses RAID for redundancy and rsnapshot for incremental backups to storinator01.
+
+#### Backup Schedule
+
+Backups run via cron on the backend server:
+
+```bash
+crontab -l -u copr
+# Typically runs weekly (Fridays)
+0 3 * * 5 ionice --class=idle /usr/local/bin/rsnapshot_copr_backend >/dev/null
+```
+
+#### Verifying Backend Backups
+
+1. Check the most recent backup start time:
+
+```bash
+ssh copr-be
+xz -d < /var/log/cron-20241101.xz | grep '(copr) CMD'
+# Look for:
+# Nov  1 03:00:02 copr-be CROND[3482216]: (copr) CMD (ionice --class=idle /usr/local/bin/rsnapshot_copr_backend >/dev/null)
+```
+
+2. Find a build that completed just before that time (e.g., build 8185411)
+
+3. Verify it exists on storinator01:
+
+```bash
+ssh copr@storinator01.rdu-cc.fedoraproject.org
+find /srv/nfs/copr-be/copr-be-copr-user/backup/.sync/var/lib/copr/public_html/results/@copr/copr-pull-requests:pr:3473 | grep 8185411 | grep rpm$
+```
+
+4. Check available disk space:
+
+```bash
+df -h /srv/nfs/copr-be
+```
+
+<Note>
+Backups typically take several days to complete. Don't verify a build if the backup is still in progress.
+</Note>
+
+#### Backend Recovery Procedure
+
+<Warning>
+Recovery from backups is a multi-day operation. Plan carefully and don't rush.
+</Warning>
+
+The rsync from storinator runs at ~110 MB/s. For 20TB of data, expect 5 days of sync time.
+
+**Step 1: Prepare a new RAID array**
+
+Spawn a temporary instance:
+
+```bash
+git clone git@github.com:fedora-copr/ansible-fedora-copr.git
+cd ansible-fedora-copr
+./run-playbook pb-backup-recovery-01.yml
+```
+
+Run the configuration playbook:
+
+```bash
+ansible-playbook ./pb-backup-recovery-02.yml -i 54.81.xxx.xx, -u fedora
+```
+
+**Step 2: Create RAID array**
+
+SSH to the instance and partition disks:
+
+```bash
+for i in /dev/nvme[1-4]n1 ; do \
+    (echo gpt ; echo n ; echo ; echo ; echo ; echo ; echo w ) | sudo fdisk $i
+done
+```
+
+Create RAID 10:
+
+```bash
+mdadm --create /dev/md0 --level raid10 \
+    --name copr-backend-data --raid-disks 4 /dev/nvme[1-4]n1p1
+```
+
+Format and mount:
+
+```bash
+mkfs.ext4 /dev/md0 -L copr-repo
+tune2fs -m0 /dev/md0
+mkdir /mnt/data
+chown copr:copr /mnt/data
+mount /dev/disk/by-label/copr-repo /mnt/data/
+```
+
+**Step 3: Workaround kernel bug**
+
+<Warning>
+There's a kernel bug causing IO operations to hang. Apply this workaround:
+</Warning>
+
+```bash
+echo frozen > /sys/block/md0/md/sync_action
+```
+
+After data is copied (about a week), unfreeze:
+
+```bash
+echo idle > /sys/block/md0/md/sync_action
+```
+
+**Step 4: Setup SSH keys**
+
+Run in tmux as copr user:
+
+```bash
+tmux
+su - copr
+ssh-keygen -t rsa
+```
+
+Copy `~/.ssh/id_rsa.pub` to storinator01:
+
+```bash
+ssh frostyx@storinator01.rdu-cc.fedoraproject.org
+sudo su - copr
+vim ~/.ssh/authorized_keys  # Add the public key
+```
+
+**Step 5: Sync the data**
+
+From the temporary instance:
+
+```bash
+time until rsync -av -H --info=progress2 --rsh=ssh \
+    --max-alloc=4G \
+    copr@storinator01.rdu-cc.fedoraproject.org:/srv/nfs/copr-be/copr-be-copr-user/backup/.sync/var/lib/copr/public_html/ \
+    /mnt/data; \
+    do true; done
+```
+
+<Note>
+This command will retry on failure and run for approximately 5 days.
+</Note>
+
+**Step 6: Attach volumes to production**
+
+Umount from temporary instance:
+
+```bash
+umount /mnt/data/
+mdadm --stop /dev/md0
+```
+
+In AWS EC2 console:
+1. Detach all `copr-backend-backup-test-raid-10` volumes from temporary instance
+2. Stop the backend service: `systemctl stop copr-backend.target`
+3. Detach old volumes from production instance
+4. Attach recovery volumes to production instance
+5. Assemble RAID and mount
+
+**Step 7: Fix permissions**
+
+Temporarily disable SELinux:
+
+```bash
+setenforce 0
+```
+
+Start services:
+
+```bash
+systemctl start lighttpd.service copr-backend.target
+```
+
+Relabel filesystem:
+
+```bash
+time copr-selinux-relabel
+setenforce 1
+```
+
+### Database Backups
+
+#### Private (Complete) Backups
+
+Complete dumps with sensitive data are stored in `/backups/` on the frontend:
+
+```bash
+ssh copr-fe
+su - postgres
+/usr/local/bin/backup-database coprdb
+```
+
+<Warning>
+This script sleeps initially and takes 20+ minutes due to XZ compression. The backup contains sensitive data like API tokens - never download or publish it.
+</Warning>
+
+Backups are automatically pulled by rdiff-backup configured via Ansible:
+https://pagure.io/fedora-infra/ansible/blob/main/f/playbooks/rdiff-backup.yml
+
+Verify backups exist:
+
+```bash
+ls -alh /backups/
+# Should show recent timestamp:
+# -rw-r--r--. 1 postgres postgres 662M Nov  5 01:21 coprdb-2024-11-05.dump.xz
+```
+
+#### Public Database Dumps
+
+Sanitized dumps (without private tables) are available at:
+https://copr.fedorainfracloud.org/db_dumps/
+
+Generated by:
+```bash
+cat /etc/cron.d/cron-backup-database-coprdb
+```
+
+These dumps are suitable for:
+- Testing and debugging
+- Development environments
+- Public experimentation
+
+### Keygen and DistGit Backups
+
+#### Keygen Volume Snapshots
+
+GPG keypairs on `/var/lib/copr-keygen` are protected by EC2 volume snapshots.
+
+Verify in AWS Console:
+1. Go to EC2 > Volumes > `vol-0108e05e229bf7eaf`
+2. Check snapshots are being created in **Ohio (us-east-2)**
+3. Filter with tag: `FedoraGroup=copr`
+
+<Note>
+Snapshots are stored in us-east-2 (Ohio), not us-east-1 (Virginia).
+</Note>
+
+#### DistGit Snapshots
+
+DistGit data is extensive (terabytes) but not critical:
+- Periodic EC2 volume snapshots are taken
+- In case of failure, restore from snapshot or initialize empty volume
+- No formal backup process due to data being reproducible
+
+## System Upgrades
+
+### Upgrading Persistent Instances
+
+Upgrading Copr infrastructure to new Fedora versions involves creating fresh VMs and migrating data.
+
+#### Pre-Upgrade Preparation
+
+**1. Announce the outage** (see [Outage Announcements](/development/maintenance#announcing-outages))
+
+**2. Check for hotfixes**
+
+On the old instance:
+
+```bash
+rpm -Va | grep -v -e /etc/ -e /boot/
+```
+
+Review files marked with `S.5....T.` - these have been modified.
+
+Also check: https://github.com/fedora-copr/copr/issues?q=label%3Ahot-fixed+is%3Aclosed
+
+**3. Clone helper repository**
+
+```bash
+git clone git@github.com:fedora-copr/ansible-fedora-copr.git
+cd ansible-fedora-copr
+```
+
+Review and update `group_vars/{dev,prod}.yml` with:
+- Correct data volume IDs from EC2
+- New AMI ID for Fedora N+2 from https://fedoraproject.org/cloud/download/
+- Instance types, names, IP addresses
+
+**4. Backup Let's Encrypt certificates**
+
+```bash
+sudo rbac-playbook -l copr-keygen.aws.fedoraproject.org \
+    groups/copr-keygen.yml -t certbot
+```
+
+Do this for all instances (frontend, backend, distgit, keygen).
+
+#### Launch New Instances
+
+Spawn new VM:
+
+```bash
+opts=( -e copr_instance=dev -e server_id=keygen )
+ansible-playbook play-vm-migration-01-new-box.yml "${opts[@]}"
+```
+
+Note the output:
+```
+ElasticIP: not specified
+Instance ID: i-04ba36eb360187572
+Network ID: eni-048189f432f068270
+Private IP: 172.30.2.94
+```
+
+Update `group_vars/{dev,prod}.yml` with new instance and network IDs.
+
+#### Backend Pre-Preparation
+
+<Note>
+For backend only: Run the playbook against a temporary hostname before the outage to minimize downtime.
+</Note>
+
+Ensure `copr-be-dev-temp.aws.fedoraproject.org` is in inventory:
+
+```ini
+[copr_back_dev_aws]
+copr-be-dev.aws.fedoraproject.org
+copr-be-dev-temp.aws.fedoraproject.org birthday=yes
+```
+
+Run playbook:
+
+```bash
+sudo rbac-playbook -l copr-be-dev-temp.aws.fedoraproject.org \
+    groups/copr-backend.yml
+```
+
+#### Outage Window
+
+**1. Announce ongoing outage**
+
+**2. Migrate IPs and volumes**
+
+For backend:
+
+```bash
+ansible-playbook play-vm-migration-02-migrate-backend-box.yml "${opts[@]}"
+```
+
+<Warning>
+Follow manual instructions during playbook execution for DB backups and consistency checks.
+</Warning>
+
+For other services:
+
+```bash
+ansible-playbook play-vm-migration-02-migrate-non-backend-box.yml "${opts[@]}"
+```
+
+**3. Provision new instances**
+
+In `fedora-infra/ansible`, set `birthday=yes`:
+
+```ini
+[copr_front_dev_aws]
+copr.stg.fedoraproject.org birthday=yes
+```
+
+Run upgrade playbook:
+
+```bash
+sudo rbac-playbook -l copr-fe-dev.aws.fedoraproject.org \
+    manual/copr/copr-frontend-upgrade.yml
+sudo rbac-playbook -l copr-fe-dev.aws.fedoraproject.org \
+    groups/copr-frontend.yml
+```
+
+**4. Upgrade PostgreSQL (Frontend only)**
+
+Stop httpd:
+
+```bash
+systemctl stop httpd
+```
+
+Upgrade database:
+
+```bash
+dnf install postgresql-upgrade
+postgresql-setup --upgrade
+systemctl start postgresql
+```
+
+Rebuild indexes:
+
+```bash
+su postgres
+reindexdb --all
+```
+
+Restart httpd:
+
+```bash
+systemctl start httpd
+```
+
+**5. Apply hotfixes and finalize**
+
+Revert `birthday=yes` and set `services_disabled: false`.
+Rerun playbooks until all services are operational.
+
+#### Post-Upgrade
+
+**1. Test reboot**
+
+```bash
+reboot
+```
+
+Debug any boot issues now rather than during a future emergency.
+
+**2. Rename instances**
+
+Remove `-new` suffix from new instances, add `-old` to old ones:
+
+```bash
+opts=( -e copr_instance=dev )
+ansible-playbook play-vm-migration-03-rename-instances.yml "${opts[@]}"
+```
+
+**3. Terminate old instances**
+
+In AWS EC2:
+1. Disable termination protection: Actions → Instance settings → Change termination protection
+2. Terminate instances
+
+Keep old VMs for a few days if you want to retain DB `/backups`.
+
+**4. Announce resolution**
+
+### Upgrading Builders
+
+Builder VMs are ephemeral and automatically use the latest packages from infra repos.
+
+<Note>
+If copr-rpmbuild is updated, terminate resalloc VMs to force recreation with new version.
+</Note>
+
+## Monitoring
+
+### Monitoring Services
+
+Copr uses multiple monitoring systems:
+
+1. **Nagios** - Primary monitoring for Fedora Infrastructure
+   - https://nagios.fedoraproject.org/nagios/cgi-bin//status.cgi?hostgroup=copr_all_instances_aws
+   - Checks: availability, storage, hypervisor health
+
+2. **Nagios External** - External availability checks
+   - https://nagios-external.fedoraproject.org/nagios/cgi-bin//status.cgi?hostgroup=copr_all_instances_aws
+
+3. **Prometheus** - Metrics and Grafana dashboards (internal to Red Hat)
+
+4. **UptimeRobot** - Geographic CDN availability (AWS CloudFront)
+
+### Health Checks
+
+#### copr-ping Test
+
+Periodic end-to-end test that submits a build through the entire stack:
+
+```bash
+# Configured on backend
+cat /etc/cron.d/copr-ping
+```
+
+Monitor results: https://copr.fedorainfracloud.org/coprs/g/copr/copr-ping/builds/
+
+#### Storage Analysis
+
+Weekly storage analysis generates usage statistics:
+
+```bash
+/usr/bin/copr-backend-analyze-results
+```
+
+View statistics: https://copr-be.cloud.fedoraproject.org/stats/index.html
+
+#### Manual Health Checks
+
+Verify all services:
+
+```bash
+# Check Copr package versions
+./releng/run-on-all-infra 'rpm -qa | grep copr'
+
+# Check for available updates
+./releng/run-on-all-infra 'dnf copr list'
+
+# Check service status
+systemctl status copr-backend.target
+systemctl status httpd
+systemctl status postgresql
+```
+
+### Log Locations
+
+```bash
+# Frontend
+/var/log/httpd/error_log
+/var/log/copr-frontend/
+
+# Backend  
+/var/log/copr-backend/
+/var/log/lighttpd/
+
+# Database
+/var/lib/pgsql/data/log/
+
+# DistGit
+/var/log/copr-dist-git/
+```
+
+## Routine Maintenance Tasks
+
+### Managing Chroots
+
+#### Enable New Fedora Release
+
+<Warning>
+Run this BEFORE Fedora branching happens to copy builds with correct dist tags.
+</Warning>
+
+```bash
+ssh copr-fe
+su - copr-fe
+copr-frontend branch-fedora 31
+```
+
+This creates `fedora-31-*` chroots and forks latest successful Rawhide builds.
+
+Once actions are processed (check https://copr.fedorainfracloud.org/status/stats/), activate:
+
+```bash
+copr-frontend alter-chroot --action activate \
+    fedora-31-x86_64 fedora-31-i386 \
+    fedora-31-ppc64le fedora-31-aarch64 \
+    fedora-31-armhfp fedora-31-s390x
+```
+
+#### Disable EOL Chroots
+
+<Warning>
+Check that other services (Fedora Review Service) don't depend on the chroot before disabling.
+</Warning>
+
+```bash
+fv=34
+copr-frontend alter-chroot --action eol \
+    fedora-$fv-x86_64 fedora-$fv-i386 \
+    fedora-$fv-ppc64le fedora-$fv-aarch64 \
+    fedora-$fv-armhfp fedora-$fv-s390x
+```
+
+This disables builds but preserves all repositories and data.
+
+#### EOL Lifeless Rolling Chroots
+
+Automatically mark inactive rolling chroots (Rawhide, CentOS Stream):
+
+```bash
+copr-frontend eol-lifeless-rolling-chroots
+```
+
+Add to cron for daily execution:
+
+```bash
+# /etc/cron.d/copr-frontend-optional
+0 2 * * * copr-fe /usr/bin/copr-frontend eol-lifeless-rolling-chroots
+```
+
+### Database Maintenance
+
+#### Manual Backup
+
+```bash
+su - postgres
+/usr/local/bin/backup-database coprdb
+```
+
+#### Vacuum and Analyze
+
+```bash
+su - postgres
+vacuumdb --all --analyze
+```
+
+#### Check Database Size
+
+```bash
+su - postgres
+psql -c "SELECT pg_database.datname, pg_size_pretty(pg_database_size(pg_database.datname)) AS size FROM pg_database;"
+```
+
+### Announcing Outages
+
+Follow this workflow for planned maintenance:
+
+**1. Schedule outage**
+
+Create ticket: https://pagure.io/fedora-infrastructure/new_issue
+
+**2. Announce planned outage**
+
+- Update status.fedoraproject.org
+- Email: copr-devel@lists.fedorahosted.org
+- Twitter/Mastodon via Fedora Infrastructure
+
+**3. Start maintenance - announce ongoing**
+
+Update status page to "Ongoing outage"
+
+**4. Complete maintenance - announce resolution**
+
+- Update status page to "Resolved"
+- Email copr-devel with changes summary
+- Close infrastructure ticket
+
+## Emergency Procedures
+
+### Backend Down - Builds Failing
+
+1. Check backend services:
+
+```bash
+systemctl status copr-backend.target
+systemctl status lighttpd
+```
+
+2. Check RAID status:
+
+```bash
+cat /proc/mdstat
+mdadm --detail /dev/md0
+```
+
+3. Check disk space:
+
+```bash
+df -h /var/lib/copr/public_html/results
+```
+
+4. Review logs:
+
+```bash
+journalctl -u copr-backend -n 100
+tail -100 /var/log/copr-backend/backend.log
+```
+
+### Frontend Down - Website Inaccessible
+
+1. Check httpd:
+
+```bash
+systemctl status httpd
+journalctl -u httpd -n 50
+```
+
+2. Check database:
+
+```bash
+systemctl status postgresql
+su - postgres -c "psql -c 'SELECT 1'"
+```
+
+3. Check disk space:
+
+```bash
+df -h
+```
+
+### Database Issues
+
+1. Check connections:
+
+```bash
+su - postgres
+psql -c "SELECT count(*) FROM pg_stat_activity;"
+```
+
+2. Check for long queries:
+
+```bash
+psql -c "SELECT pid, now() - query_start AS duration, query FROM pg_stat_activity WHERE state = 'active' ORDER BY duration DESC;"
+```
+
+3. Check locks:
+
+```bash
+psql -c "SELECT * FROM pg_locks WHERE NOT granted;"
+```
+
+## Additional Resources
+
+<CardGroup cols={2}>
+  <Card title="Deployment Options" icon="server" href="/development/deployment">
+    Learn how to deploy Copr in different environments
+  </Card>
+  <Card title="Release Process" icon="rocket" href="/development/release-process">
+    Understand the Copr release workflow
+  </Card>
+  <Card title="Fedora Infra Copr SOP" icon="book" href="https://docs.fedoraproject.org/en-US/infra/sysadmin_guide/copr/">
+    Official Fedora Infrastructure procedures
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/developer-documentation/architecture">
+    Understand Copr's system architecture
+  </Card>
+</CardGroup>

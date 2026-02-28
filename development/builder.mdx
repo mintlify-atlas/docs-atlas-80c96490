@@ -1,0 +1,503 @@
+---
+title: Builder Component
+description: Builder machines that execute package builds using copr-rpmbuild
+---
+
+## Overview
+
+The **Builder** component consists of ephemeral machines (VMs or containers) that execute the actual package builds. The core tool is `copr-rpmbuild`, which handles:
+
+- Source package acquisition (from dist-git, URLs, etc.)
+- Mock chroot preparation
+- RPM/SRPM building
+- Build artifact collection
+- Live build log streaming
+
+<Note>
+The `copr-builder` package has been deprecated and merged into `copr-rpmbuild`. 
+For historical reference, see the `builder/` directory which now just points to the rpmbuild component.
+</Note>
+
+## Architecture
+
+```
+┌──────────────┐
+│   Backend    │ allocates builder via Resalloc
+└──────┬───────┘
+       │
+       ▼
+┌────────────────────────────────────────┐
+│         Builder Machine (VM)            │
+│                                         │
+│  ┌──────────────────────────────────┐  │
+│  │       copr-rpmbuild              │  │
+│  ├──────────────────────────────────┤  │
+│  │  1. Fetch sources                │  │
+│  │  2. Setup mock chroot            │  │
+│  │  3. Build SRPM (if needed)       │  │
+│  │  4. Build RPMs                   │  │
+│  │  5. Collect results              │  │
+│  └──────────────────────────────────┘  │
+│                                         │
+│  ┌──────────────────────────────────┐  │
+│  │          Mock Chroot             │  │
+│  │   (/var/lib/mock/...)            │  │
+│  │                                  │  │
+│  │   - buildroot RPMs               │  │
+│  │   - build environment            │  │
+│  │   - rpmbuild execution           │  │
+│  └──────────────────────────────────┘  │
+└─────────────────────────────────────────┘
+```
+
+## copr-rpmbuild Tool
+
+<Accordion title="Command Line Interface">
+### Basic Usage
+
+```bash
+# Build from task ID (fetches config from frontend)
+copr-rpmbuild <build_id> --chroot <chroot_name>
+
+# Example
+copr-rpmbuild 12345 --chroot fedora-39-x86_64
+```
+
+### Common Options
+
+```bash
+# Verbose output
+copr-rpmbuild 12345 --chroot fedora-39-x86_64 --verbose
+
+# Detached mode (background)
+copr-rpmbuild 12345 --chroot fedora-39-x86_64 --detached
+
+# Drop result directory after build
+copr-rpmbuild 12345 --chroot fedora-39-x86_64 --drop-resultdir
+
+# Enable networking in buildroot
+copr-rpmbuild 12345 --chroot fedora-39-x86_64 --enable-net
+
+# Custom timeout (seconds)
+copr-rpmbuild 12345 --chroot fedora-39-x86_64 --timeout 7200
+```
+</Accordion>
+
+## Build Process
+
+<Accordion title="Build Execution Flow">
+### 1. Source Acquisition
+
+**From DistGit**:
+```bash
+# Clone from dist-git
+git clone http://copr-dist-git/git/@copr/project/package.git
+cd package
+
+# Download sources from lookaside
+pkgname=$(rpmspec -q --qf '%{name}' *.spec)
+wget http://copr-dist-git/repo/pkgs/@copr/project/$pkgname/...
+```
+
+**From URL**:
+```bash
+# Direct SRPM download
+wget https://example.com/package.src.rpm
+```
+
+**From Git + Tito**:
+```bash
+git clone https://github.com/user/package
+cd package
+tito build --srpm
+```
+
+### 2. Mock Preparation
+
+```bash
+# Initialize mock chroot
+mock -r <config> --init
+
+# Install build dependencies from spec
+mock -r <config> --installdeps package.src.rpm
+
+# Configure mock with:
+#  - Additional repos (copr://, external URLs)
+#  - Build requires
+#  - Network settings (disabled by default)
+#  - Bootstrap image (if specified)
+```
+
+### 3. SRPM Build (if needed)
+
+```bash
+# Build SRPM from spec + sources
+mock -r <config> --buildsrpm \
+  --spec package.spec \
+  --sources .
+```
+
+### 4. RPM Build
+
+```bash
+# Build binary RPMs from SRPM
+mock -r <config> --rebuild package.src.rpm
+```
+
+### 5. Result Collection
+
+```bash
+# Collect from mock result directory
+cp /var/lib/mock/<config>/result/*.rpm ./results/
+cp /var/lib/mock/<config>/result/*.log ./results/
+
+# Generate results.json with metadata
+cat > results/results.json <<EOF
+{
+  "packages": [
+    {"name": "package", "version": "1.0", "release": "1", ...}
+  ],
+  "built_packages": ["package-1.0-1.fc39.x86_64.rpm", ...],
+  "source_package": "package-1.0-1.fc39.src.rpm"
+}
+EOF
+```
+</Accordion>
+
+## Mock Configuration
+
+<Accordion title="Mock Config Customization">
+copr-rpmbuild generates mock config with Copr-specific settings:
+
+```python
+# Base config
+config_opts['root'] = 'fedora-39-x86_64'
+config_opts['chroot_setup_cmd'] = 'install @buildsys-build'
+
+# Additional repositories
+config_opts['yum.conf'] += """
+[copr:repo1]
+name=Copr repo
+baseurl=https://copr-be.cloud.fedoraproject.org/results/@copr/project/fedora-39-x86_64/
+gpgcheck=0
+enabled=1
+
+[external-repo]
+name=External repository
+baseurl=https://example.com/repo/
+gpgcheck=1
+enabled=1
+"""
+
+# Networking (disabled by default for security)
+config_opts['use_host_resolv'] = False
+config_opts['rpmbuild_networking'] = False
+
+# Bootstrap image (optional)
+config_opts['bootstrap_image'] = 'registry.fedoraproject.org/fedora:39'
+
+# Isolation (nspawn, simple, or none)
+config_opts['isolation'] = 'simple'
+```
+</Accordion>
+
+## Build Results
+
+<Accordion title="Result Directory Structure">
+```
+results/
+├── package-1.0-1.fc39.src.rpm        # Source RPM
+├── package-1.0-1.fc39.x86_64.rpm     # Binary RPM
+├── package-devel-1.0-1.fc39.x86_64.rpm  # Subpackage
+├── build.log.gz                       # Full build log
+├── backend.log.gz                     # Backend processing log
+├── builder-live.log.gz                # Live streaming log
+├── root.log.gz                        # Mock root.log
+├── state.log.gz                       # Mock state.log
+├── results.json                       # Structured metadata
+└── configs/                           # Mock configs used
+    └── child.cfg
+```
+
+### results.json Format
+
+```json
+{
+  "packages": [
+    {
+      "name": "package",
+      "epoch": 0,
+      "version": "1.0",
+      "release": "1.fc39",
+      "arch": "x86_64"
+    }
+  ],
+  "built_packages": [
+    "package-1.0-1.fc39.x86_64.rpm",
+    "package-devel-1.0-1.fc39.x86_64.rpm"
+  ],
+  "source_package": "package-1.0-1.fc39.src.rpm",
+  "source_package_name": "package",
+  "source_package_version": "1.0-1.fc39"
+}
+```
+</Accordion>
+
+## Live Log Streaming
+
+<Accordion title="Real-time Build Monitoring">
+Builders stream build progress to backend:
+
+```python
+# Builder pushes log lines to backend
+import requests
+
+with open('/var/lib/mock/build.log') as f:
+    for line in f:
+        requests.post(
+            f'{backend_url}/update',
+            data={'log': line, 'build_id': build_id}
+        )
+```
+
+Backend stores in Redis and serves via HTTP:
+```bash
+# View live log
+curl https://copr-be.cloud.fedoraproject.org/results/\
+  @copr/copr-dev/fedora-39-x86_64/12345-package/builder-live.log
+```
+</Accordion>
+
+## Builder Provisioning
+
+<Accordion title="Machine Types">
+### Virtual Machines
+
+Managed by Resalloc with various providers:
+
+**OpenStack (Nova)**:
+```yaml
+# Resalloc pool configuration
+pools:
+  x86_64:
+    max: 20
+    max_starting: 5
+    max_prealloc: 2
+    tags:
+      - arch_x86_64
+    cmd_new: |
+      nova boot \
+        --flavor m1.large \
+        --image fedora-39 \
+        --key-name copr-builder \
+        builder-{id}
+```
+
+**AWS EC2**:
+```yaml
+pools:
+  x86_64_aws:
+    max: 50
+    tags:
+      - arch_x86_64
+      - aws
+    cmd_new: |
+      aws ec2 run-instances \
+        --image-id ami-xxxxx \
+        --instance-type t3.large \
+        --key-name copr-builder
+```
+
+### Containers
+
+**Podman**:
+```yaml
+pools:
+  x86_64_container:
+    max: 100
+    tags:
+      - arch_x86_64
+      - container
+    cmd_new: |
+      podman run -d \
+        --name builder-{id} \
+        --privileged \
+        quay.io/copr/copr-builder:latest
+```
+</Accordion>
+
+## Builder Image
+
+<Accordion title="Pre-installed Packages">
+Builder images include:
+
+### Build Tools
+- `mock` - Build system
+- `rpmbuild` - RPM building
+- `rpm-build` - RPM creation
+- `dnf` or `yum` - Package manager
+- `createrepo_c` - Repository generation
+
+### Version Control
+- `git` - Git repositories
+- `tito` - Tag and build RPMs from git
+- `rpkg` - RPM packaging toolkit
+
+### Scripting
+- `python3` - Python runtime
+- `python3-copr-rpmbuild` - Build orchestration
+- `bash` - Shell scripting
+
+### Networking
+- `openssh-server` - SSH access
+- `rsync` - File synchronization
+- `curl`, `wget` - File download
+
+### Build Requirements
+- Common build dependencies (gcc, make, etc.)
+- Language-specific tools (python3-devel, ruby-devel, etc.)
+</Accordion>
+
+## Security Considerations
+
+<Accordion title="Build Isolation">
+### Network Restrictions
+
+- **Default**: Networking disabled in buildroot
+- **Rationale**: Prevent untrusted code from accessing network
+- **Override**: `--enable-net` flag (requires user permission)
+
+### User Separation
+
+```bash
+# Builds run as mockbuild user (UID 1000)
+config_opts['chrootuid'] = 1000
+config_opts['chrootgid'] = 135  # mockbuild group
+```
+
+### Filesystem Isolation
+
+- Mock uses systemd-nspawn or chroot for isolation
+- Buildroot has no access to host filesystem
+- Only result directory is accessible after build
+
+### Ephemeral Machines
+
+- Builder VMs are destroyed after each build
+- No persistence between builds
+- Prevents cross-contamination
+</Accordion>
+
+## SSH Access for Debugging
+
+<Accordion title="User SSH Feature">
+Copr allows users to SSH into their builder machines for debugging:
+
+### Enable SSH Access
+
+```bash
+# In build submission (API or Web UI)
+{
+  "ssh_public_keys": [
+    "ssh-rsa AAAAB3NzaC1yc2EA... user@host"
+  ]
+}
+```
+
+### Connection Process
+
+1. Backend notifies user of SSH connection details:
+   ```
+   SSH access enabled:
+   ssh root@builder-12345.example.com
+   Access expires in 24 hours
+   ```
+
+2. User connects and can:
+   - Inspect mock chroot: `/var/lib/mock/<config>/root/`
+   - View build logs: `/var/lib/mock/<config>/result/`
+   - Re-run build commands manually
+   - Debug build failures
+
+3. Builder is automatically terminated after expiration
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Common Build Issues">
+### Build Dependency Problems
+
+**Problem**: Missing build dependencies
+```
+ERROR: Failed build dependencies:
+    package-devel is needed by package-1.0-1.fc39.src
+```
+**Solution**: Add BuildRequires to spec file or external repository
+
+### Network Access Errors
+
+**Problem**: Network unreachable during build
+```
+Error: Failed to download https://example.com/file.tar.gz
+```
+**Solution**: 
+- Enable networking with `--enable-net` (requires permission)
+- Pre-download and include in dist-git
+
+### Mock Initialization Failures
+
+**Problem**: Cannot initialize chroot
+```
+ERROR: Failed to initialize chroot
+```
+**Solution**:
+- Check mock configuration
+- Verify repository availability
+- Ensure sufficient disk space
+
+### Architecture Mismatches
+
+**Problem**: Package excludes architecture
+```
+ExcludeArch: x86_64
+```
+**Solution**: Build will be skipped, not an error
+</Accordion>
+
+## Performance Optimization
+
+<Accordion title="Build Speed Tips">
+### Use Bootstrap Images
+
+Pre-built container images speed up chroot initialization:
+
+```python
+config_opts['bootstrap_image'] = \
+  'registry.fedoraproject.org/fedora:39'
+```
+
+### Enable Build Caching
+
+Mock can cache downloaded packages:
+
+```python
+config_opts['plugin_conf']['ccache_enable'] = True
+config_opts['plugin_conf']['root_cache_enable'] = True
+```
+
+### Parallel Builds
+
+Increase parallel make jobs:
+
+```spec
+# In spec file
+%make_build -j%{_smp_build_ncpus}
+```
+</Accordion>
+
+## See Also
+
+- [Backend Component](/development/backend)
+- [copr-rpmbuild Source](https://github.com/fedora-copr/copr/tree/main/rpmbuild)
+- [Mock Documentation](https://github.com/rpm-software-management/mock/wiki)
+- [Resalloc Documentation](https://github.com/praiskup/resalloc)

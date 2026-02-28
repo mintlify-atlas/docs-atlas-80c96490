@@ -1,80 +1,278 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart guide
+description: Get from account setup to your first successful build in Copr in just a few steps
 ---
 
-## Get started in three steps
+# Quickstart guide
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through creating your first Copr project and building your first package. If you're completely new to Copr, you're in the right place.
 
-### Step 1: Set up your local environment
+<Note>
+Before you begin, make sure you have a source RPM (SRPM) ready to build. If you don't have one yet, see the [RPM Packaging Guide](https://rpm-packaging-guide.github.io/) for instructions.
+</Note>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+## Prerequisites
+
+You'll need:
+- A Fedora Account System (FAS) account
+- A source RPM file or a Git repository with a .spec file
+- A Fedora-based system with DNF package manager (for CLI installation)
+
+## Step-by-step setup
+
+<Steps>
+  <Step title="Create a FAS account">
+    Register for a Fedora Account System account at [accounts.fedoraproject.org](https://accounts.fedoraproject.org).
+
+    This account gives you access to Copr and other Fedora infrastructure services.
+  </Step>
+
+  <Step title="Log in to Copr">
+    Visit [copr.fedorainfracloud.org](https://copr.fedorainfracloud.org) and click the login link in the top right corner.
+
+    Use your FAS credentials to authenticate.
+  </Step>
+
+  <Step title="Generate API token">
+    Navigate to the API token page at [copr.fedorainfracloud.org/api](https://copr.fedorainfracloud.org/api).
+
+    Copy the generated configuration and save it to `~/.config/copr` on your local machine:
+
+    ```bash
+    mkdir -p ~/.config
+    # Paste the API token configuration into this file
+    nano ~/.config/copr
+    ```
+
+    The configuration file should look like this:
+
+    ```ini
+    [copr-cli]
+    login = your-username
+    username = your-username  
+    token = your-api-token
+    copr_url = https://copr.fedorainfracloud.org
+    ```
+
+    <Warning>
+    Keep your API token secure. Don't share it or commit it to version control.
+    </Warning>
+  </Step>
+
+  <Step title="Install copr-cli">
+    Install the Copr command-line tool on Fedora:
+
+    ```bash
+    sudo dnf install copr-cli
+    ```
+
+    Verify the installation:
+
+    ```bash
+    copr-cli --version
+    ```
+  </Step>
+
+  <Step title="Create your first project">
+    Create a project and specify which distributions you want to build for (chroots):
+
+    ```bash
+    copr-cli create first-project --chroot fedora-rawhide-x86_64
+    ```
+
+    You can specify multiple chroots to build for different distributions:
+
+    ```bash
+    copr-cli create my-project \
+      --chroot fedora-rawhide-x86_64 \
+      --chroot fedora-39-x86_64 \
+      --chroot epel-9-x86_64
+    ```
+
+    <Info>
+    Use `copr-cli list-chroots` to see all available build targets.
+    </Info>
+  </Step>
+
+  <Step title="Submit your first build">
+    Build from a local SRPM file:
+
+    ```bash
+    copr-cli build first-project path/to/your-package.src.rpm
+    ```
+
+    Or build from a publicly accessible SRPM URL:
+
+    ```bash
+    copr-cli build first-project https://example.com/your-package.src.rpm
+    ```
+
+    The command will output a build ID and URL where you can monitor progress:
+
+    ```
+    Created builds: 123456
+    Watching build(s): (this may be safely interrupted)
+    Build 123456: succeeded
+    ```
+
+    <Info>
+    Builds typically take 5-15 minutes depending on package complexity and builder availability.
+    </Info>
+  </Step>
+
+  <Step title="Enable your repository">
+    Once the build succeeds, users can enable your repository:
+
+    ```bash
+    sudo dnf copr enable your-username/first-project
+    ```
+
+    Then install your package:
+
+    ```bash
+    sudo dnf install your-package-name
+    ```
+  </Step>
+</Steps>
+
+## Build from Git repository
+
+Instead of building from SRPMs, you can build directly from Git:
+
+```bash
+copr-cli build-scm first-project \
+  --clone-url https://github.com/your-username/your-project.git \
+  --commit main \
+  --subdir ./ \
+  --spec your-package.spec \
+  --type git \
+  --method rpkg
+```
+
+<CodeGroup>
+```bash Git
+copr-cli build-scm my-project \
+  --clone-url https://github.com/example/myapp.git \
+  --commit v1.0.0 \
+  --spec myapp.spec \
+  --type git
+```
+
+```bash DistGit
+copr-cli build-distgit my-project \
+  --name package-name \
+  --distgit fedora \
+  --commit rawhide
+```
+
+```bash Tito
+copr-cli build-scm my-project \
+  --clone-url https://github.com/example/myapp.git \
+  --type git \
+  --method tito
+```
+</CodeGroup>
+
+## Web UI workflow
+
+You can also manage everything through the web interface:
+
+<Steps>
+  <Step title="Create project">
+    Click "New Project" from your Copr homepage and fill in:
+    - Project name
+    - Chroots (build targets)
+    - Optional: description, instructions, external repositories
+  </Step>
+
+  <Step title="Submit build">
+    Go to your project page and click "Builds" → "New Build"
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    Choose your source type:
+    - Upload SRPM directly
+    - Provide URL to SRPM
+    - Build from Git/DistGit/SVN
+    - Build from PyPI or RubyGems
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Monitor build">
+    Watch build progress on the build detail page. You'll see:
+    - Real-time status for each chroot
+    - Build logs
+    - Built packages when complete
+  </Step>
+</Steps>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Common build options
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+### Background builds
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+For mass rebuilds or lower-priority builds, use the `--background` flag:
 
-### Step 3: Go live
+```bash
+copr-cli build first-project package.src.rpm --background
+```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+### Specific chroots
+
+Build only for specific targets instead of all project chroots:
+
+```bash
+copr-cli build first-project package.src.rpm \
+  --chroot fedora-39-x86_64 \
+  --chroot fedora-rawhide-x86_64
+```
+
+### Build dependencies
+
+If your package depends on another Copr repository or external repository, add it to your project settings:
+
+```bash
+copr-cli modify first-project \
+  --repo https://copr-be.cloud.fedoraproject.org/results/another-user/another-project/fedora-$releasever-$basearch/
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Build sources" icon="code">
+    Explore different source types: Git, DistGit, PyPI, RubyGems, and custom scripts
+  </Card>
+  <Card title="Webhooks" icon="webhook">
+    Set up automated builds triggered by Git push events
+  </Card>
+  <Card title="Team collaboration" icon="users">
+    Share project access with collaborators and groups
+  </Card>
+  <Card title="API automation" icon="robot">
+    Use the Copr API and python-copr library for automation
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Troubleshooting
+
+### Build failed
+
+Check the build logs for errors:
+1. Click on the build ID from the command output or web UI
+2. Select the failed chroot
+3. Review `build.log.gz` for compilation errors
+4. Review `root.log.gz` for dependency issues
+
+### Authentication errors
+
+If you get authentication errors:
+1. Verify your `~/.config/copr` file has the correct token
+2. Check file permissions: `chmod 600 ~/.config/copr`
+3. Re-generate your API token from the web UI if needed
+
+### Repository not found
+
+After enabling a repository, if DNF can't find it:
+1. Ensure the build completed successfully
+2. Wait a few minutes for CDN propagation
+3. Try `dnf clean all && dnf makecache`
+
+<Info>
+For more help, see the [FAQ section](https://docs.pagure.org/copr.copr/user_documentation.html#faq) or [report an issue](https://github.com/fedora-copr/copr/issues).
+</Info>

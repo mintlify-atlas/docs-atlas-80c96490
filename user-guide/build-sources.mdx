@@ -1,0 +1,564 @@
+---
+title: Build sources
+description: Different build source types supported by Copr
+---
+
+Copr supports multiple build source types to accommodate different workflows and package management approaches.
+
+## URL source
+
+Provide direct HTTP/HTTPS URLs to SRPM or spec files.
+
+### SRPM URLs
+
+Provide URLs to `.src.rpm` or `.nosrc.rpm` files:
+
+```bash
+copr-cli build my-project https://example.com/package-1.0-1.fc40.src.rpm
+```
+
+### Spec file URLs
+
+Provide a URL to a `.spec` file. Copr will download sources specified in the spec during the build:
+
+```bash
+copr-cli build my-project https://example.com/package.spec
+```
+
+### Multiple URLs
+
+Submit multiple builds at once by separating URLs with spaces or newlines:
+
+```bash
+copr-cli build my-project \
+  https://example.com/pkg1.src.rpm \
+  https://example.com/pkg2.src.rpm
+```
+
+<Warning>
+Build order is not guaranteed when submitting multiple URLs.
+</Warning>
+
+## Upload source
+
+Upload SRPM or spec files directly from your local machine.
+
+<Tabs>
+  <Tab title="CLI">
+    ```bash
+    copr-cli build my-project /path/to/package.src.rpm
+    ```
+  </Tab>
+  
+  <Tab title="Web UI">
+    Use the "Upload" option in the New Build dialog to select a local file.
+  </Tab>
+</Tabs>
+
+## SCM source
+
+Build from Git, DistGit, or SVN repositories containing RPM spec files.
+
+### Basic usage
+
+```bash
+copr-cli add-package-scm my-project \
+  --name mypackage \
+  --clone-url https://github.com/user/mypackage.git
+```
+
+### SCM options
+
+**Type**
+
+SCM type: `git` or `svn`
+
+```bash
+--scm-type git
+```
+
+**Clone URL**
+
+Repository URL to clone:
+
+```bash
+--clone-url https://github.com/user/repo.git
+```
+
+**Committish**
+
+Specific branch, tag, or commit to checkout (default: HEAD of master branch):
+
+```bash
+--committish v1.2.3
+```
+
+**Subdirectory**
+
+Path relative to repository root where build should be executed:
+
+```bash
+--subdirectory rpm/
+```
+
+**Spec file**
+
+Path to spec file relative to subdirectory. Auto-located if not specified:
+
+```bash
+--spec mypackage.spec
+```
+
+You can anchor the path with `/` for absolute repository paths:
+
+```bash
+--spec /rpm/example.spec
+```
+
+### SRPM build methods
+
+Copr supports four methods for generating SRPMs from SCM repositories.
+
+<Accordion title="rpkg (default)">
+The default method using [rpkg-util](https://pagure.io/rpkg-util). Supports Git, SVN, and DistGit repositories.
+
+```bash
+copr-cli add-package-scm my-project \
+  --name mypackage \
+  --clone-url https://github.com/user/repo.git \
+  --srpm-build-method rpkg
+```
+
+<Note>
+Starting from December 2021, Copr uses rpkg-util v3. Your spec files need to use `{{{ }}}` templates. See the rpkg-util documentation for details.
+</Note>
+</Accordion>
+
+<Accordion title="tito">
+Uses [Tito](https://github.com/dgoodwin/tito) to build SRPM from the latest Git tag.
+
+```bash
+copr-cli add-package-scm my-project \
+  --name mypackage \
+  --clone-url https://github.com/user/repo.git \
+  --srpm-build-method tito
+```
+
+<Note>
+The repository must be initialized with `tito init` first. The spec file field is ignored when using Tito.
+</Note>
+</Accordion>
+
+<Accordion title="tito_test">
+Uses Tito with the `--test` flag to build from a specific committish instead of the latest tag.
+
+```bash
+copr-cli add-package-scm my-project \
+  --name mypackage \
+  --clone-url https://github.com/user/repo.git \
+  --committish develop \
+  --srpm-build-method tito_test
+```
+</Accordion>
+
+<Accordion title="make_srpm">
+Executes a user-provided Makefile to generate the SRPM. Create a `.copr/Makefile` in your repository with an `srpm` target.
+
+**Example `.copr/Makefile`:**
+
+```makefile
+srpm:
+	dnf -y install tito
+	tito build --test --srpm --output=$(outdir)
+```
+
+The Makefile is invoked as:
+
+```bash
+make -f <repodir>/.copr/Makefile srpm outdir="<outdir>" spec="<spec_path>"
+```
+
+**Parameters:**
+- `outdir`: Where to place the resulting SRPM
+- `spec`: The spec file path (can be ignored if not needed)
+
+The script runs with root privileges in a mock chroot and has internet access.
+
+```bash
+copr-cli add-package-scm my-project \
+  --name mypackage \
+  --clone-url https://github.com/user/repo.git \
+  --srpm-build-method make_srpm
+```
+</Accordion>
+
+### Complete SCM example
+
+```bash
+copr-cli add-package-scm my-project \
+  --name myapp \
+  --clone-url https://github.com/user/myapp.git \
+  --committish main \
+  --subdirectory packaging/ \
+  --spec myapp.spec \
+  --srpm-build-method rpkg \
+  --webhook-rebuild on
+
+copr-cli build-package my-project --name myapp
+```
+
+## DistGit source
+
+Simplified interface for building from Fedora or CentOS DistGit repositories.
+
+### Building from Fedora DistGit
+
+```bash
+copr-cli build-distgit my-project --name python-requests
+```
+
+This uses the default Fedora DistGit instance and default branch (rawhide).
+
+### Building from CentOS DistGit
+
+```bash
+copr-cli build-distgit my-project \
+  --name httpd \
+  --distgit centos \
+  --commit c8
+```
+
+### DistGit options
+
+**Name**
+
+Package name in DistGit:
+
+```bash
+--name httpd
+```
+
+**DistGit instance**
+
+Which DistGit to use (default: `fedora`):
+
+```bash
+--distgit centos
+```
+
+**Committish**
+
+Branch, tag, or commit to build from:
+
+```bash
+--commit f39
+```
+
+**Namespace**
+
+DistGit namespace (for forks or special paths):
+
+```bash
+--namespace forks/username
+```
+
+For Copr packages:
+```bash
+--namespace @copr/copr
+```
+
+<Note>
+The SRPM is downloaded once per build, regardless of the number of chroots. All chroots build from the same SRPM, which may cause incompatibilities if building for multiple OS versions.
+</Note>
+
+### Workaround for multiple OS versions
+
+Submit separate builds for different branches:
+
+```bash
+copr-cli build-distgit my-project \
+  --name mypackage \
+  --chroot fedora-rawhide-x86_64 \
+  --commit rawhide
+
+copr-cli build-distgit my-project \
+  --name mypackage \
+  --chroot epel-8-x86_64 \
+  --commit epel8
+```
+
+## PyPI source
+
+Build Python packages directly from [PyPI](https://pypi.python.org/).
+
+```bash
+copr-cli add-package-pypi my-project \
+  --name python-flask \
+  --packagename flask \
+  --packageversion 2.0.1
+```
+
+### PyPI options
+
+**Package name**
+
+PyPI package name:
+
+```bash
+--packagename flask
+```
+
+**Package version**
+
+Specific version (optional, uses latest if not specified):
+
+```bash
+--packageversion 2.0.1
+```
+
+**Spec generator**
+
+Tool to generate RPM spec file:
+
+- `pyp2rpm` (legacy)
+- `pyp2spec` (default, recommended)
+
+```bash
+--spec-generator pyp2spec
+```
+
+**Spec template**
+
+Template for spec generation:
+
+- `default`
+- `fedora`
+- `epel7`
+- `mageia`
+- `pld`
+
+```bash
+--spec-template fedora
+```
+
+**Python versions**
+
+Which Python versions to build for:
+
+```bash
+--pythonversions 3
+```
+
+### Example PyPI build
+
+```bash
+copr-cli add-package-pypi my-project \
+  --name python-requests \
+  --packagename requests \
+  --spec-generator pyp2spec \
+  --pythonversions 3
+
+copr-cli build-package my-project --name python-requests
+```
+
+Copr uses [pyp2rpm](https://github.com/fedora-python/pyp2rpm) or [pyp2spec](https://github.com/fedora-python/pyp2spec) to translate PyPI packages to SRPMs.
+
+## RubyGems source
+
+Build Ruby gems from [RubyGems.org](https://rubygems.org/).
+
+```bash
+copr-cli add-package-rubygems my-project \
+  --name rubygem-rails \
+  --gem rails
+```
+
+### RubyGems options
+
+**Gem name**
+
+Gem name from RubyGems.org:
+
+```bash
+--gem rails
+```
+
+Copr uses [gem2rpm](https://github.com/fedora-ruby/gem2rpm) to translate RubyGems packages to SRPMs.
+
+### Example RubyGems build
+
+```bash
+copr-cli add-package-rubygems my-project \
+  --name rubygem-sinatra \
+  --gem sinatra
+
+copr-cli build-package my-project --name rubygem-sinatra
+```
+
+## Custom source (script)
+
+Use a custom script to generate sources for building SRPMs.
+
+### Creating a custom source package
+
+```bash
+copr-cli add-package-custom my-project \
+  --name mypackage \
+  --script script.sh \
+  --builddeps "git rpmdevtools" \
+  --script-chroot fedora-latest-x86_64
+```
+
+### Custom source options
+
+**Script**
+
+The script that generates sources. Must be executable and start with a shebang:
+
+```bash
+#!/bin/bash
+set -e
+
+# Clone repository
+git clone https://github.com/user/repo.git
+cd repo
+
+# Generate tarball
+git archive --format=tar.gz --prefix=myapp-1.0/ HEAD > $COPR_RESULTDIR/myapp-1.0.tar.gz
+
+# Copy spec file
+cp myapp.spec $COPR_RESULTDIR/
+```
+
+**Build dependencies**
+
+Packages to install before running the script:
+
+```bash
+--builddeps "git rpmdevtools spectool"
+```
+
+**External repositories**
+
+Additional repositories for build dependencies:
+
+```bash
+--script-repos "https://example.com/repo/"
+```
+
+**Script chroot**
+
+Mock chroot where the script runs (default: `fedora-latest-x86_64`):
+
+```bash
+--script-chroot fedora-latest-x86_64
+```
+
+**Result directory**
+
+Where to place generated files (default: current directory):
+
+```bash
+--script-resultdir ./output
+```
+
+### Environment variables
+
+**COPR_RESULTDIR**
+
+Directory where you must place the spec file and sources.
+
+**hook_data**
+
+For custom webhook builds, POST data is available in the `hook_data` file in the current directory.
+
+### Complete custom source example
+
+**script.sh:**
+```bash
+#!/bin/bash
+set -eu
+
+# Install additional tools
+dnf install -y git rpmdevtools
+
+# Clone and prepare sources
+git clone https://github.com/myuser/myapp.git
+cd myapp
+git archive --format=tar.gz --prefix=myapp-1.0/ HEAD > myapp-1.0.tar.gz
+
+# Copy to result directory
+cp myapp-1.0.tar.gz "$COPR_RESULTDIR/"
+cp packaging/myapp.spec "$COPR_RESULTDIR/"
+```
+
+**Add package:**
+```bash
+copr-cli add-package-custom my-project \
+  --name myapp \
+  --script script.sh \
+  --builddeps "git rpmdevtools" \
+  --script-chroot fedora-latest-x86_64
+```
+
+**Build:**
+```bash
+copr-cli build-package my-project --name myapp
+```
+
+<Note>
+The custom script runs with root privileges inside a mock chroot and has internet access.
+</Note>
+
+## Choosing a source type
+
+<Accordion title="When to use URL source">
+Use URL source when:
+- You already have built SRPMs hosted somewhere
+- You want to quickly test a build without setting up package definitions
+- You're building from a one-time URL
+</Accordion>
+
+<Accordion title="When to use Upload source">
+Use Upload source when:
+- You have SRPMs or spec files on your local machine
+- You're doing quick tests or one-off builds
+- You want to build locally-modified packages
+</Accordion>
+
+<Accordion title="When to use SCM source">
+Use SCM source when:
+- Your package sources are in Git or SVN
+- You want to rebuild automatically via webhooks
+- You use tito or rpkg for package management
+- You need fine-grained control over the build process
+</Accordion>
+
+<Accordion title="When to use DistGit source">
+Use DistGit source when:
+- You're building from Fedora or CentOS DistGit
+- You want a simpler interface than SCM
+- You're building Fedora packages in Copr
+</Accordion>
+
+<Accordion title="When to use PyPI source">
+Use PyPI source when:
+- You're packaging Python projects from PyPI
+- You want automatic spec file generation
+- You're creating RPMs for Python modules
+</Accordion>
+
+<Accordion title="When to use RubyGems source">
+Use RubyGems source when:
+- You're packaging Ruby gems from RubyGems.org
+- You want automatic spec file generation
+- You're creating RPMs for Ruby gems
+</Accordion>
+
+<Accordion title="When to use Custom source">
+Use Custom source when:
+- You need a completely custom build process
+- Existing source types don't fit your workflow
+- You need to perform complex preparation steps
+- You want to integrate with external systems
+</Accordion>

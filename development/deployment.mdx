@@ -1,0 +1,350 @@
+---
+title: Deployment Options
+description: Deploy Copr using Docker Compose, Kubernetes, or OpenShift
+---
+
+Copr can be deployed in multiple environments depending on your infrastructure needs. This guide covers Docker Compose for local development, Kubernetes for scalable deployments, and OpenShift for enterprise environments.
+
+## Docker Compose Deployment
+
+Docker Compose provides the simplest way to run Copr locally for development and testing.
+
+### Architecture Overview
+
+The Docker Compose deployment includes:
+
+- **Frontend** - Web UI and API (port 5000)
+- **Backend** - Build dispatcher and logger (port 5002)
+- **DistGit** - Source package management (port 5001)
+- **Keygen** - GPG key signing service (port 5003)
+- **Database** - PostgreSQL (port 5009)
+- **Redis** - Message queue
+- **Resalloc** - Resource allocation for builders (WebUI on port 5005)
+- **Builder** - Build execution environment
+
+### Starting Services
+
+Build and start all services:
+
+```bash
+docker compose build
+docker compose up
+```
+
+Start specific services:
+
+```bash
+docker compose up frontend database redis
+```
+
+### Port Layout
+
+| Service | Host Port | Container Port | Purpose |
+|---------|-----------|----------------|----------|
+| Frontend | 5000 | 5000 | Web UI/API |
+| DistGit | 5001 | 5001 | Source access |
+| Backend | 5002 | 5002 | Build results |
+| Keygen | - | 5003 | Key signing |
+| Resalloc WebUI | 5005 | 5000 | Resource monitoring |
+| PostgreSQL | 5009 | 5432 | Database |
+
+### Service Configuration
+
+The `docker-compose.yaml` defines key backend services:
+
+```yaml
+backend-build:
+  build:
+    context: docker/backend
+  command: [
+    "/run-backend",
+    "--sign-host", "keygen-signd",
+    "/usr/bin/copr-run-dispatcher-backend",
+    "builds"
+  ]
+  volumes:
+    - .:/opt/copr:z
+    - results:/var/lib/copr/public_html/results:z
+```
+
+### Persistent Volumes
+
+Docker Compose creates persistent volumes for:
+
+- `results` - Build artifacts
+- `database` - PostgreSQL data
+- `redis` - Message queue data
+- `dist-git` - Source repositories
+- `copr-keygen` - GPG keys
+- `resalloc` - Resource allocation state
+
+<Warning>
+The builder container requires `privileged: true` to execute RPM builds. This should only be used in development environments.
+</Warning>
+
+## Kubernetes Deployment
+
+Kubernetes deployment uses Kustomize for configuration management and is suitable for pre-production environments.
+
+### Prerequisites
+
+1. **Kustomize** - Install from https://github.com/kubernetes-sigs/kustomize
+2. **Docker Images** - Build locally or use custom registry:
+
+```bash
+docker compose build
+```
+
+3. **Domain and Certificates** - Replace `sample.copr.org` with your domain:
+
+```bash
+find kubernetes/kustomize -type f -exec sed -i 's/sample.copr.org/your-domain.com/g' {} +
+```
+
+Update TLS certificates:
+
+```bash
+cp your-domain.crt kubernetes/kustomize/cert/tls.crt
+cp your-domain.key kubernetes/kustomize/cert/tls.key
+```
+
+4. **Storage Class** - Update persistent volume claims to match your cluster:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: copr-database-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: ssd  # Update this
+```
+
+### Deploying to Kubernetes
+
+Generate final manifests:
+
+```bash
+kustomize build kubernetes/kustomize > copr-deployment.yaml
+```
+
+Apply to cluster:
+
+```bash
+kubectl apply -f copr-deployment.yaml
+```
+
+Or apply directly:
+
+```bash
+kustomize build kubernetes/kustomize | kubectl apply -f -
+```
+
+### Namespace and Resources
+
+All resources are deployed to the `fedora-copr` namespace:
+
+```bash
+kubectl get pods -n fedora-copr
+kubectl get services -n fedora-copr
+kubectl logs -n fedora-copr <pod-name>
+```
+
+### Component Configuration
+
+Kustomize creates ConfigMaps from configuration files:
+
+- `config/frontend/` - Frontend Apache and Copr config
+- `config/backend/` - Backend, Nginx, and signing config
+- `config/distgit/` - DistGit configuration
+- `config/keygen/` - Key signing configuration
+- `config/builder/` - Builder client configuration
+- `config/resalloc/` - Resource allocation pools
+
+### Builder Configuration
+
+<Warning>
+The default Kubernetes deployment includes a single privileged builder pod for demonstration. For production, integrate with cloud providers or use the [resalloc-kubernetes plugin](https://github.com/TommyLike/resalloc-kubernetes).
+</Warning>
+
+Example Resalloc configuration for Kubernetes builders:
+
+```yaml
+kubernetes_x86_64_normal_prod:
+  max: 5
+  max_starting: 2
+  max_prealloc: 1
+  tags:
+    - x86_64
+    - normal
+  cmd_new: |
+    resalloc add --namespace fedora-copr \
+      --cpu-resource 2 \
+      --memory-resource 2048Mi \
+      --image-tag copr-builder:latest \
+      --additional-volume-size 10Gi \
+      --additional-volume-class ssd \
+      --additional-volume-mount-path /var/lib/copr-rpmbuild \
+      --timeout 300
+  cmd_delete: resalloc delete --namespace fedora-copr
+  cmd_livecheck: "/usr/bin/resalloc-check-vm-ip"
+  livecheck_period: 180
+  reuse_opportunity_time: 180
+  reuse_max_count: 8
+  reuse_max_time: 1800
+```
+
+### Updating Images
+
+Override image names and tags in `kustomization.yaml`:
+
+```yaml
+images:
+- name: copr_frontend:latest
+  newName: quay.io/copr/frontend
+  newTag: v1.0.0
+- name: copr_backend-build:latest
+  newName: quay.io/copr/backend
+  newTag: v1.0.0
+```
+
+## OpenShift Deployment
+
+OpenShift deployment uses Ansible playbooks and Jinja2 templates for automated infrastructure provisioning.
+
+### Prerequisites
+
+1. **OpenShift Cluster** - Access to an OpenShift cluster
+2. **AWS Credentials** - For EC2 builder instances (currently required)
+3. **Configuration File** - Create from template:
+
+```bash
+cp openshift/secret-vars.yml.template openshift/secret-vars.yml
+```
+
+Fill in required values:
+
+```yaml
+project: copr-dev
+oc_api_endpoint: https://api.your-cluster.com:6443
+
+# AWS credentials for builders
+aws_access_key_id: YOUR_ACCESS_KEY
+aws_secret_access_key: YOUR_SECRET_KEY
+
+# Database credentials
+postgres_password: secure_password
+
+# SSH keys for builder access
+builder_ssh_public_key: ssh-rsa AAAAB3...
+builder_ssh_private_key: |
+  -----BEGIN RSA PRIVATE KEY-----
+  ...
+  -----END RSA PRIVATE KEY-----
+```
+
+### Deploying to OpenShift
+
+Login to OpenShift:
+
+```bash
+oc login https://api.your-cluster.com:6443
+```
+
+Deploy all services:
+
+```bash
+cd openshift
+make
+```
+
+This runs the Ansible playbook:
+
+```bash
+ansible-playbook deploy.yml
+```
+
+### Selective Deployment
+
+Deploy specific components using tags:
+
+```bash
+ansible-playbook deploy.yml --tags frontend
+ansible-playbook deploy.yml --tags backend
+ansible-playbook deploy.yml --tags distgit
+ansible-playbook deploy.yml --tags keygen
+ansible-playbook deploy.yml --tags resalloc
+```
+
+### OpenShift Services
+
+The deployment creates these DeploymentConfigs:
+
+- `copr-frontend` - Web application
+- `copr-backend` - Build dispatcher (with action and log containers)
+- `copr-distgit` - DistGit service
+- `copr-keygen` - GPG signing service
+- `postgresql` - Database
+- `redis` - Message queue
+- `resalloc` - Builder resource management
+
+### Configuration Management
+
+Configuration is templated using Jinja2:
+
+```bash
+openshift/config/
+├── backend-copr-be.conf
+├── backend-nginx.conf
+├── frontend-copr.conf
+├── distgit-distgit.conf.j2
+├── distgit-copr.conf.j2
+├── resalloc-pool.yaml.j2
+├── resalloc-server.yaml.j2
+├── resalloc-aws-credentials.j2
+└── resalloc-spinup-playbook.yml.j2
+```
+
+### Container Images
+
+Current images are hosted at: https://quay.io/organization/copr
+
+<Warning>
+This deployment is in pre-production state. Ensure proper security configuration before production use, especially for the keygen signing service which currently allows requests from any pod.
+</Warning>
+
+### Known Limitations
+
+1. **Privileged Containers** - OpenShift typically doesn't allow privileged containers, so builders must be VMs
+2. **Logging** - Logs should be sent to stdout/stderr for `oc logs` integration
+3. **Signing Security** - The keygen service needs security hardening
+4. **Certificate Management** - Let's Encrypt automation not yet implemented
+5. **Cron Jobs** - Automatic build removal and maintenance tasks need setup
+
+## Deployment Comparison
+
+| Feature | Docker Compose | Kubernetes | OpenShift |
+|---------|----------------|------------|------------|
+| **Best For** | Local development | Pre-production | Enterprise production |
+| **Setup Time** | 5 minutes | 30 minutes | 2 minutes (with config) |
+| **Scalability** | Single host | Multi-node cluster | Multi-node cluster |
+| **Builder Support** | Privileged container | Privileged pod or VMs | VMs (AWS EC2) |
+| **Configuration** | docker-compose.yaml | Kustomize + YAML | Ansible + Jinja2 |
+| **Automation** | Manual | kubectl apply | Ansible playbook |
+| **Storage** | Local volumes | PersistentVolumes | PersistentVolumes |
+| **Networking** | Host ports | Ingress | Routes |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Maintenance" icon="wrench" href="/development/maintenance">
+    Learn about backup, monitoring, and routine operations
+  </Card>
+  <Card title="Release Process" icon="rocket" href="/development/release-process">
+    Understand how Copr is released and packaged
+  </Card>
+</CardGroup>

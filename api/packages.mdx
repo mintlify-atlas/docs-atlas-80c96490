@@ -1,0 +1,380 @@
+---
+title: Package Endpoints
+description: Manage packages in Copr projects
+---
+
+## Get Package
+
+<CodeGroup>
+```bash GET /api_3/package/
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/package/?ownername=@copr&projectname=copr-dev&packagename=copr-frontend"
+```
+</CodeGroup>
+
+Get a single package from a Copr project.
+
+### Query Parameters
+
+<ParamField query="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField query="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField query="packagename" type="string" required>
+  Package name
+</ParamField>
+
+<ParamField query="with_latest_build" type="boolean" default="false">
+  Include latest build information
+</ParamField>
+
+<ParamField query="with_latest_succeeded_build" type="boolean" default="false">
+  Include latest successful build information
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="integer">
+  Package ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Package name
+</ResponseField>
+
+<ResponseField name="projectname" type="string">
+  Project name
+</ResponseField>
+
+<ResponseField name="ownername" type="string">
+  Project owner name
+</ResponseField>
+
+<ResponseField name="source_type" type="string">
+  Source type: "scm", "link", "upload", "pypi", "rubygems", "custom"
+</ResponseField>
+
+<ResponseField name="source_dict" type="object">
+  Source configuration dictionary
+</ResponseField>
+
+<ResponseField name="auto_rebuild" type="boolean">
+  Whether automatic rebuilds via webhooks are enabled
+</ResponseField>
+
+<ResponseField name="builds" type="object">
+  Build information (if requested)
+  <Expandable title="properties">
+    <ResponseField name="latest" type="object">
+      Latest build object
+    </ResponseField>
+    <ResponseField name="latest_succeeded" type="object">
+      Latest successful build object
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## List Packages
+
+<CodeGroup>
+```bash GET /api_3/package/list
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/package/list?ownername=@copr&projectname=copr-dev"
+```
+</CodeGroup>
+
+Get a list of packages from a Copr project.
+
+### Query Parameters
+
+<ParamField query="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField query="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField query="with_latest_build" type="boolean" default="false">
+  Include latest build information for each package
+</ParamField>
+
+<ParamField query="with_latest_succeeded_build" type="boolean" default="false">
+  Include latest successful build information
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Number of items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+### Response
+
+<ResponseField name="items" type="array">
+  Array of package objects (same structure as Get Package)
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Pagination metadata
+</ResponseField>
+
+---
+
+## Create Package
+
+<CodeGroup>
+```bash POST /api_3/package/add/<ownername>/<projectname>/<package_name>/<source_type>
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/package/add/myuser/my-project/my-package/scm" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clone_url": "https://github.com/user/repo.git",
+    "committish": "main",
+    "subdirectory": "",
+    "spec": "package.spec",
+    "source_build_method": "rpkg",
+    "webhook_rebuild": true
+  }'
+```
+</CodeGroup>
+
+Create a new package inside a Copr project. Requires authentication.
+
+See [package source types documentation](https://python-copr.readthedocs.io/en/latest/client_v3/package_source_types.html) for required fields for each source type.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField path="package_name" type="string" required>
+  Package name (must be unique within project)
+</ParamField>
+
+<ParamField path="source_type" type="string" required>
+  Source type: "scm", "link", "upload", "pypi", "rubygems", "custom"
+</ParamField>
+
+### Request Body (SCM source type)
+
+<ParamField body="clone_url" type="string" required>
+  Git/SVN repository URL
+</ParamField>
+
+<ParamField body="committish" type="string">
+  Branch, tag, or commit hash
+</ParamField>
+
+<ParamField body="subdirectory" type="string">
+  Subdirectory within repository
+</ParamField>
+
+<ParamField body="spec" type="string">
+  Path to .spec file
+</ParamField>
+
+<ParamField body="source_build_method" type="string">
+  SRPM build method: "rpkg", "tito", "tito_test", "make_srpm"
+</ParamField>
+
+<ParamField body="webhook_rebuild" type="boolean" default="false">
+  Enable automatic rebuilds via webhooks
+</ParamField>
+
+<ParamField body="max_builds" type="integer">
+  Maximum number of builds to keep
+</ParamField>
+
+<ParamField body="timeout" type="integer">
+  Build timeout in seconds
+</ParamField>
+
+### Response
+
+Returns the created package object with 200 status code.
+
+---
+
+## Edit Package
+
+<CodeGroup>
+```bash POST /api_3/package/edit/<ownername>/<projectname>/<package_name>
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/package/edit/myuser/my-project/my-package" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "webhook_rebuild": true,
+    "committish": "develop"
+  }'
+```
+</CodeGroup>
+
+Edit an existing package within a Copr project. Requires authentication.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField path="package_name" type="string" required>
+  Package name
+</ParamField>
+
+<ParamField path="source_type" type="string">
+  Source type (optional, uses existing if not specified)
+</ParamField>
+
+### Request Body
+
+Accepts the same fields as Create Package. Only provided fields will be updated.
+
+### Response
+
+Returns the updated package object with 200 status code.
+
+---
+
+## Reset Package
+
+<CodeGroup>
+```bash PUT /api_3/package/reset
+curl -X PUT \
+  "https://copr.fedorainfracloud.org/api_3/package/reset" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownername": "myuser",
+    "projectname": "my-project",
+    "package_name": "my-package"
+  }'
+```
+</CodeGroup>
+
+Reset a package to its initial state. Requires authentication.
+
+### Request Body
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="package_name" type="string" required>
+  Package name
+</ParamField>
+
+### Response
+
+Returns the reset package object with 200 status code.
+
+---
+
+## Build Package
+
+<CodeGroup>
+```bash POST /api_3/package/build
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/package/build" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownername": "myuser",
+    "projectname": "my-project",
+    "package_name": "my-package",
+    "chroots": ["fedora-40-x86_64", "fedora-39-x86_64"]
+  }'
+```
+</CodeGroup>
+
+Build a package using its configured source. Requires authentication.
+
+### Request Body
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="package_name" type="string" required>
+  Package name
+</ParamField>
+
+<ParamField body="chroots" type="array">
+  List of chroot names to build in (defaults to all project chroots)
+</ParamField>
+
+<ParamField body="background" type="boolean" default="false">
+  Run as background build
+</ParamField>
+
+<ParamField body="timeout" type="integer">
+  Build timeout in seconds
+</ParamField>
+
+<ParamField body="enable_net" type="boolean">
+  Enable network access during build
+</ParamField>
+
+### Response
+
+Returns the created build object with 200 status code.
+
+---
+
+## Delete Package
+
+<CodeGroup>
+```bash DELETE /api_3/package/delete
+curl -X DELETE \
+  "https://copr.fedorainfracloud.org/api_3/package/delete" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownername": "myuser",
+    "projectname": "my-project",
+    "package_name": "my-package"
+  }'
+```
+</CodeGroup>
+
+Delete a package from a Copr project. Requires authentication.
+
+### Request Body
+
+<ParamField body="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField body="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField body="package_name" type="string" required>
+  Package name
+</ParamField>
+
+### Response
+
+Returns the deleted package object with 200 status code.

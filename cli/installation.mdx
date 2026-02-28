@@ -1,0 +1,198 @@
+---
+title: Installation
+description: Install copr-cli on various Linux distributions
+---
+
+## Overview
+
+copr-cli is the command-line interface for the Copr build system. It allows you to manage projects, submit builds, and interact with the Copr service from your terminal.
+
+## Installation Methods
+
+<CodeGroup>
+
+```bash Fedora / RHEL / CentOS
+# Install from official repositories
+sudo dnf install copr-cli
+
+# Verify installation
+copr-cli --version
+```
+
+```bash Debian / Ubuntu
+# Install dependencies first
+sudo apt-get update
+sudo apt-get install python3-pip python3-setuptools
+
+# Install from PyPI
+pip3 install --user copr-cli
+
+# Add to PATH if needed
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+```bash Arch Linux
+# Install from AUR
+yay -S copr-cli
+
+# Or using another AUR helper
+paru -S copr-cli
+```
+
+```bash Python pip (Any Distribution)
+# Install system-wide (requires root)
+sudo pip3 install copr-cli
+
+# Or install for current user
+pip3 install --user copr-cli
+```
+
+</CodeGroup>
+
+## Installation from Source
+
+To install copr-cli directly from source:
+
+```bash
+# Clone the repository
+git clone https://github.com/fedora-copr/copr.git
+cd copr/cli
+
+# Install dependencies
+sudo dnf install python3-devel python3-setuptools
+
+# Install
+python3 setup.py install --user
+```
+
+## Dependencies
+
+copr-cli requires the following Python packages:
+
+- `python-copr` - Python API client for Copr
+- `requests` - HTTP library
+- `argcomplete` (optional) - Shell tab completion
+- `beautifulsoup4` (optional) - HTML parsing for error messages
+- `rich` - Terminal formatting and colors
+
+## Optional Features
+
+### Tab Completion
+
+To enable shell tab completion, install `argcomplete`:
+
+<CodeGroup>
+
+```bash Bash
+# Install argcomplete
+sudo dnf install python3-argcomplete
+
+# Enable globally
+sudo activate-global-python-argcomplete
+
+# Or for current user only
+eval "$(register-python-argcomplete copr-cli)"
+echo 'eval "$(register-python-argcomplete copr-cli)"' >> ~/.bashrc
+```
+
+```bash Zsh
+# Install argcomplete
+sudo dnf install python3-argcomplete
+
+# Enable for zsh
+autoload -U bashcompinit
+bashcompinit
+eval "$(register-python-argcomplete copr-cli)"
+
+# Add to ~/.zshrc
+echo 'autoload -U bashcompinit' >> ~/.zshrc
+echo 'bashcompinit' >> ~/.zshrc
+echo 'eval "$(register-python-argcomplete copr-cli)"' >> ~/.zshrc
+```
+
+</CodeGroup>
+
+### GSSAPI Authentication
+
+For GSSAPI/Kerberos authentication support:
+
+```bash
+sudo dnf install python3-gssapi krb5-workstation
+```
+
+## Verifying Installation
+
+After installation, verify that copr-cli is working:
+
+```bash
+# Check version
+copr-cli --version
+
+# List available commands
+copr-cli --help
+
+# Test connection (requires configuration)
+copr-cli whoami
+```
+
+## Upgrading
+
+<CodeGroup>
+
+```bash Fedora / RHEL / CentOS
+sudo dnf upgrade copr-cli
+```
+
+```bash Debian / Ubuntu
+pip3 install --user --upgrade copr-cli
+```
+
+```bash Python pip
+pip3 install --upgrade copr-cli
+```
+
+</CodeGroup>
+
+## Troubleshooting
+
+### Command Not Found
+
+If `copr-cli` is not found after installation:
+
+```bash
+# Check if installed in user directory
+ls ~/.local/bin/copr-cli
+
+# Add to PATH
+export PATH="$HOME/.local/bin:$PATH"
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
+### Import Errors
+
+If you see Python import errors:
+
+```bash
+# Reinstall with all dependencies
+pip3 install --user --force-reinstall copr-cli
+
+# Or install missing dependencies
+pip3 install --user requests python-copr rich
+```
+
+### Permission Denied
+
+If you get permission errors:
+
+```bash
+# Install for current user instead of system-wide
+pip3 install --user copr-cli
+```
+
+## Next Steps
+
+After installing copr-cli, you need to configure authentication:
+
+- [Configuration](/cli/configuration) - Set up API token and configuration file
+- [Commands Reference](/cli/commands) - Learn about available commands
+- [Examples](/cli/examples) - See real-world usage examples

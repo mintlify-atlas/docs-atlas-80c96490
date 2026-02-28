@@ -1,0 +1,475 @@
+---
+title: Backend Component
+description: Build orchestration system that manages builder machines and coordinates build execution
+---
+
+## Overview
+
+The **copr-backend** is the build orchestration service that:
+
+- Communicates with Frontend to fetch build tasks
+- Manages builder machine allocation via Resalloc
+- Dispatches builds to builders and monitors execution
+- Handles repository generation with `createrepo_c`
+- Signs packages with GPG keys
+- Processes actions (createrepo, delete, fork, etc.)
+- Publishes build results and logs
+
+<Accordion title="Key Technologies">
+- **Language**: Python 3
+- **Builder Management**: Resalloc server
+- **Repository Generation**: createrepo_c, prunerepo
+- **Package Signing**: obs-signd, rpm-sign
+- **Messaging**: Fedora Messaging (AMQP)
+- **Task Queue**: Redis
+- **Configuration Management**: Ansible (for builder provisioning)
+</Accordion>
+
+## Architecture
+
+```
+┌─────────────┐
+│  Frontend   │
+│   (HTTP)    │
+└──────┬──────┘
+       │ fetch tasks
+       ▼
+┌─────────────────────────────────────────┐
+│          Copr Backend                    │
+│  ┌──────────────────────────────────┐   │
+│  │   Dispatchers (systemd services)  │   │
+│  ├──────────────┬───────────────────┤   │
+│  │ Build        │ Action            │   │
+│  │ Dispatcher   │ Dispatcher        │   │
+│  └──────┬───────┴──────┬────────────┘   │
+│         │              │                 │
+│         │ spawn workers│                 │
+│         ▼              ▼                 │
+│  ┌──────────────────────────────────┐   │
+│  │   Background Workers (pool)      │   │
+│  │  - Build Workers                 │   │
+│  │  - Action Workers                │   │
+│  └──────┬───────────────────────────┘   │
+│         │ allocate via Resalloc         │
+└─────────┼───────────────────────────────┘
+          │
+          ▼
+   ┌──────────────┐
+   │   Resalloc   │
+   │    Server    │
+   └──────┬───────┘
+          │ spawn/terminate
+          ▼
+   ┌──────────────┐
+   │  Builder VMs │
+   │ (copr-rpmbuild)│
+   └──────────────┘
+```
+
+## Directory Structure
+
+```
+backend/
+├── copr_backend/           # Main Python package
+│   ├── __init__.py
+│   ├── app.py             # Backend application setup
+│   ├── dispatcher.py      # Task dispatcher base class
+│   ├── background_worker.py      # Worker process logic
+│   ├── background_worker_build.py # Build-specific worker
+│   ├── daemons/           # Systemd service logic
+│   │   ├── build.py      # Build dispatcher daemon
+│   │   ├── action.py     # Action dispatcher daemon
+│   │   └── log.py        # Redis log handler
+│   ├── job.py            # Build job representation
+│   ├── actions.py        # Action handlers
+│   ├── createrepo.py     # Repository generation
+│   ├── pulp.py           # Pulp storage client
+│   ├── frontend.py       # Frontend communication
+│   ├── msgbus.py         # Fedora Messaging
+│   ├── rpm_builds.py     # RPM build helpers
+│   └── helpers.py        # Utility functions
+├── run/                   # Executable scripts
+│   ├── copr-backend-build
+│   ├── copr-backend-action
+│   ├── copr-backend-log
+│   └── copr_*.py         # Maintenance scripts
+├── units/                 # Systemd service files
+│   ├── copr-backend.target
+│   ├── copr-backend-build.service
+│   ├── copr-backend-action.service
+│   └── copr-backend-log.service
+└── conf/                  # Configuration
+    ├── copr-be.conf.example
+    └── crontab/          # Cron job definitions
+```
+
+## Core Components
+
+<Accordion title="Build Dispatcher">
+### Build Dispatcher (`daemons/build.py`)
+
+Manages the build worker pool:
+
+```python
+class BuildDispatcher:
+    def __init__(self):
+        self.max_workers = opts.builds_max_workers
+        self.worker_manager = WorkerManager()
+        
+    def run(self):
+        while True:
+            # Fetch tasks from frontend
+            tasks = self.frontend_client.get_pending_builds()
+            
+            # Spawn workers for new tasks
+            for task in tasks:
+                if self.can_start_worker():
+                    self.spawn_worker(task)
+            
+            time.sleep(self.sleep_time)
+```
+
+**Responsibilities**:
+- Fetch pending build tasks from Frontend
+- Enforce worker limits (total, per-arch, per-owner)
+- Spawn background workers for builds
+- Monitor worker health
+- Handle worker failures and timeouts
+</Accordion>
+
+<Accordion title="Build Worker">
+### Build Worker (`background_worker_build.py`)
+
+Executes individual build tasks:
+
+```python
+class BuildWorker:
+    def run(self, task_dict):
+        # 1. Allocate builder machine
+        ticket = self.resalloc_client.get_ticket(tags)
+        builder_host = ticket.hostname
+        
+        # 2. Execute build on builder
+        cmd = f"copr-rpmbuild {build_id} --chroot {chroot}"
+        ssh.run_command(builder_host, cmd)
+        
+        # 3. Download results
+        self.download_results(builder_host)
+        
+        # 4. Sign packages (if enabled)
+        if do_sign:
+            self.sign_rpms(result_dir)
+        
+        # 5. Update repository
+        self.update_repository(chroot)
+        
+        # 6. Update frontend
+        self.frontend.update_build_status(build_id, status)
+        
+        # 7. Release builder
+        ticket.close()
+```
+
+**Build Flow**:
+1. Request builder from Resalloc
+2. SSH to builder and execute `copr-rpmbuild`
+3. Monitor build progress (live log streaming)
+4. Download build artifacts (RPMs, logs)
+5. Sign packages (via copr-keygen)
+6. Update repository metadata
+7. Notify frontend of completion
+8. Release builder back to pool
+</Accordion>
+
+<Accordion title="Action Dispatcher">
+### Action Dispatcher (`daemons/action.py`)
+
+Handles administrative tasks:
+
+```python
+class ActionDispatcher:
+    def run(self):
+        while True:
+            actions = self.frontend_client.get_pending_actions()
+            for action in actions:
+                if self.can_start_worker():
+                    self.spawn_action_worker(action)
+```
+
+**Action Types**:
+- `createrepo`: Generate/update repository metadata
+- `delete_build`: Remove build artifacts
+- `delete_project`: Remove entire project
+- `fork`: Copy project to new location
+- `rename`: Rename project
+- `rawhide_to_release`: Branch rawhide to new release
+- `delete_copr_dir`: Remove CoprDir (PR builds, etc.)
+</Accordion>
+
+<Accordion title="Repository Management">
+### Repository Generation (`createrepo.py`)
+
+Uses `createrepo_c` for efficient repository metadata generation:
+
+```python
+def createrepo(path, opts):
+    cmd = [
+        "createrepo_c",
+        "--database",
+        "--unique-md-filenames",
+        "--simple-md-filenames",
+        "--update",  # Incremental update
+        "--compress-type", "gz",  # Force gzip (not zstd)
+        path
+    ]
+    
+    # Add comps.xml if present
+    if os.path.exists(f"{path}/comps.xml"):
+        cmd.extend(["--groupfile", "comps.xml"])
+    
+    run_cmd(cmd)
+```
+
+**Features**:
+- Incremental updates with `--update`
+- Module metadata support
+- Comps groups integration
+- Appstream metadata generation
+- Batched createrepo (multiple builds at once)
+</Accordion>
+
+## Configuration
+
+<Accordion title="/etc/copr/copr-be.conf">
+```ini
+[backend]
+# Results published here
+results_baseurl=https://copr-be.cloud.fedoraproject.org/results
+
+# Frontend connection
+frontend_base_url=http://copr-fe
+frontend_auth=SECRET_PASSWORD
+
+# Local storage
+destdir=/var/lib/copr/public_html/results
+statsdir=/var/lib/copr/public_html/stats
+
+# Worker limits
+builds_max_workers=60
+builds_max_workers_arch=x86_64=10,aarch64=8
+builds_max_workers_owner=20
+actions_max_workers=10
+
+# Resalloc server
+resalloc_connection=http://localhost:49100
+
+# GPG signing
+do_sign=true
+keygen_host=copr-keygen.example.com
+
+# Redis
+redis_host=127.0.0.1
+redis_port=6379
+redis_db=0
+
+# Logging
+log_dir=/var/log/copr-backend/
+log_level=info
+
+# Pruning
+prune_days=14
+```
+</Accordion>
+
+## Systemd Services
+
+<Accordion title="Service Management">
+```bash
+# Start all backend services
+systemctl start copr-backend.target
+
+# Individual services
+systemctl start copr-backend-build.service   # Build dispatcher
+systemctl start copr-backend-action.service  # Action dispatcher
+systemctl start copr-backend-log.service     # Redis log handler
+
+# Check status
+systemctl status copr-backend.target
+journalctl -u copr-backend-build -f
+
+# Restart
+systemctl restart copr-backend.target
+```
+
+### Service Dependencies
+
+```
+copr-backend.target
+├── copr-backend-log.service
+├── copr-backend-build.service
+│   └── Requires: redis.service
+└── copr-backend-action.service
+    └── Requires: redis.service
+```
+</Accordion>
+
+## Resalloc Integration
+
+<Accordion title="Builder Allocation">
+### Requesting Builders
+
+```python
+from resallocserver.client import Client
+
+client = Client("http://localhost:49100")
+
+# Request builder with tags
+ticket = client.get_ticket(
+    tags=[
+        "arch_x86_64",
+        "fedora-39",
+    ],
+    sandbox="user/project",
+)
+
+# Wait for allocation
+ticket.wait_ready()
+
+# Use builder
+hostname = ticket.hostname
+
+# Release when done
+ticket.close()
+```
+
+### Ticket States
+- `NEW`: Ticket created, waiting for allocation
+- `READY`: Builder allocated and ready
+- `FAILED`: Allocation failed
+- `ENDED`: Ticket closed, builder released
+</Accordion>
+
+## Cron Jobs
+
+<Accordion title="Scheduled Maintenance">
+### Daily (`/etc/cron.daily/copr-backend`)
+
+```bash
+#!/bin/sh
+# Prune old builds
+copr_prune_results.py
+
+# Clean up orphaned workers
+copr-backend-unknown-resalloc-tickets
+```
+
+### Weekly (`/etc/cron.weekly/copr-backend`)
+
+```bash
+#!/bin/sh
+# Generate storage statistics
+copr_analyze_results.py
+```
+</Accordion>
+
+## Maintenance Scripts
+
+<Accordion title="Useful Commands">
+```bash
+# Prune old builds (respects prune_days config)
+copr_prune_results.py
+
+# Analyze storage usage
+copr_analyze_results.py
+
+# Fix GPG signatures on packages
+copr_fix_gpg.py --chroot fedora-39-x86_64
+
+# Query Pulp storage
+copr-backend-pulp-query
+
+# Generate hit counter statistics from logs
+copr_log_hitcounter.py
+
+# Find unknown Resalloc tickets
+copr-backend-unknown-resalloc-tickets
+
+# Migrate project to Pulp storage
+copr-change-storage.py --owner fedora --project copr --to-pulp
+```
+</Accordion>
+
+## Storage Backends
+
+<Accordion title="Filesystem vs Pulp">
+### Filesystem Storage (Traditional)
+
+```
+/var/lib/copr/public_html/results/
+├── @copr/
+│   ├── copr-dev/
+│   │   ├── fedora-39-x86_64/
+│   │   │   ├── 00001234-package/
+│   │   │   │   ├── package-1.0-1.fc39.x86_64.rpm
+│   │   │   │   ├── builder-live.log.gz
+│   │   │   │   └── results.json
+│   │   │   └── repodata/
+│   │   ├── srpm-builds/
+│   │   └── pubkey.gpg
+```
+
+### Pulp Storage (Modern)
+
+- Uses Pulp 3 content management
+- Deduplication of packages
+- Efficient storage and CDN integration
+- Supports large-scale deployments
+
+```python
+# Upload build to Pulp
+pulp_client.upload_build_results(
+    owner="@copr",
+    project="copr-dev",
+    chroot="fedora-39-x86_64",
+    build_id=1234,
+    rpms=[...],
+)
+```
+</Accordion>
+
+## Logging
+
+<Accordion title="Log Files">
+- **Build dispatcher**: `/var/log/copr-backend/backend.log`
+- **Action dispatcher**: `/var/log/copr-backend/backend.log`
+- **Job workers**: `/var/log/copr-backend/worker-{N}.log`
+- **Prunerepo**: `/var/log/copr-backend/prune_old.log`
+
+Logs are rotated by logrotate configured in `/etc/logrotate.d/copr-backend`
+</Accordion>
+
+## Dependencies
+
+### Core Packages
+- `python3-copr-common` - Shared Copr utilities
+- `python3-resalloc` - Resalloc client
+- `python3-requests` - HTTP client
+- `python3-daemon` - Daemonization
+- `python3-setproctitle` - Process title management
+- `python3-redis` - Redis client
+- `python3-boto3` - AWS S3 support
+
+### External Tools
+- `createrepo_c` - Repository metadata generation
+- `prunerepo` - Repository pruning
+- `obs-signd` - Package signing daemon
+- `ansible` - Builder provisioning
+- `rsync` - File synchronization
+- `openssh-clients` - SSH communication
+
+## See Also
+
+- [Frontend Component](/development/frontend)
+- [Builder Component](/development/builder)
+- [Keygen Component](/development/keygen)
+- [Resalloc Documentation](https://github.com/praiskup/resalloc)

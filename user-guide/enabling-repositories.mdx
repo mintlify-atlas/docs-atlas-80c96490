@@ -1,0 +1,439 @@
+---
+title: Enabling repositories
+description: How users install and enable Copr repositories on their systems
+---
+
+This guide explains how end users can enable and use Copr repositories on their systems to install packages.
+
+## Quick start
+
+The simplest way to enable a Copr repository:
+
+```bash
+sudo dnf copr enable user/project
+```
+
+Replace `user/project` with the owner and project name.
+
+## Methods to enable repositories
+
+### Using DNF (recommended)
+
+For modern Fedora, CentOS Stream, RHEL, and other distributions with DNF:
+
+```bash
+sudo dnf copr enable user/project
+```
+
+**Prerequisites:**
+- `dnf-plugins-core` package must be installed
+
+```bash
+sudo dnf install dnf-plugins-core
+```
+
+### Using YUM
+
+For older distributions with YUM:
+
+```bash
+sudo yum copr enable user/project
+```
+
+**Prerequisites:**
+- `yum-plugin-copr` package must be installed
+
+```bash
+sudo yum install yum-plugin-copr
+```
+
+### Manual repository file
+
+Download and install the repository file manually.
+
+<Steps>
+  <Step title="Download repository file">
+    Visit the project overview page on Copr and find the repository file download link.
+    
+    Or download directly:
+    ```bash
+    sudo wget -O /etc/yum.repos.d/user-project.repo \
+      https://copr.fedorainfracloud.org/coprs/user/project/repo/fedora-39/user-project-fedora-39.repo
+    ```
+  </Step>
+  
+  <Step title="Verify the file">
+    Check the repository configuration:
+    ```bash
+    cat /etc/yum.repos.d/user-project.repo
+    ```
+  </Step>
+  
+  <Step title="Install packages">
+    ```bash
+    sudo dnf install package-name
+    ```
+  </Step>
+</Steps>
+
+## Repository file format
+
+A typical Copr repository file looks like:
+
+```ini
+[copr:copr.fedorainfracloud.org:user:project]
+name=Copr repo for project owned by user
+baseurl=https://download.copr.fedorainfracloud.org/results/user/project/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/user/project/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+```
+
+### Repository file options
+
+**baseurl**
+
+The repository URL. Uses `$releasever` (OS version) and `$basearch` (architecture) variables.
+
+**gpgcheck=1**
+
+Verifies package signatures using the GPG key.
+
+**gpgkey**
+
+URL to the GPG public key for signature verification.
+
+**enabled=1**
+
+The repository is enabled by default.
+
+**skip_if_unavailable=True**
+
+DNF/YUM won't fail if the repository is temporarily unavailable.
+
+## Group repositories
+
+For projects owned by groups (starting with `@`):
+
+```bash
+sudo dnf copr enable @groupname/project
+```
+
+Example:
+```bash
+sudo dnf copr enable @copr/copr-dev
+```
+
+## Subproject repositories
+
+Enable subprojects (CoprDirs) with the full subproject name:
+
+```bash
+sudo dnf copr enable user/project:custom:branch
+```
+
+Examples:
+```bash
+sudo dnf copr enable user/myapp:custom:testing
+sudo dnf copr enable user/myapp:pr:42
+```
+
+## Multilib repositories
+
+For projects with multilib enabled, `dnf copr enable` automatically installs the multilib repository file on capable systems.
+
+### Manual multilib setup
+
+If you need to manually enable multilib:
+
+1. Download the multilib repository file from the project page
+2. Or modify the standard repository file to include the i386 repository
+
+Example multilib repository file:
+
+```ini
+[copr:copr.fedorainfracloud.org:user:project]
+name=Copr repo for project owned by user
+baseurl=https://download.copr.fedorainfracloud.org/results/user/project/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/user/project/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+
+[copr:copr.fedorainfracloud.org:user:project:ml]
+name=Copr repo for project owned by user (i386)
+baseurl=https://download.copr.fedorainfracloud.org/results/user/project/fedora-$releasever-i386/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/user/project/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+cost=1100
+```
+
+## Installing packages
+
+Once the repository is enabled, install packages normally:
+
+```bash
+sudo dnf install package-name
+```
+
+## Repository priority
+
+Some Copr projects set repository priority to control package preference.
+
+### Using cost parameter
+
+If a Copr package has the same version-release as a distribution package, you can prefer the Copr version:
+
+```ini
+[copr:copr.fedorainfracloud.org:user:project]
+name=Copr repo for project owned by user
+baseurl=https://download.copr.fedorainfracloud.org/results/user/project/fedora-$releasever-$basearch/
+# ... other settings ...
+cost=900
+```
+
+Lower cost values have higher priority (default is 1000).
+
+<Note>
+It's better for package maintainers to bump the release number instead of users modifying repository priority.
+</Note>
+
+### Using priority parameter
+
+If the project owner set a `repo_priority`, it will be included in the repository file:
+
+```ini
+priority=50
+```
+
+Lower priority values are preferred.
+
+## Disabling repositories
+
+Temporarily disable a Copr repository:
+
+```bash
+sudo dnf copr disable user/project
+```
+
+Or manually edit the repository file:
+
+```bash
+sudo vim /etc/yum.repos.d/user-project.repo
+```
+
+Change `enabled=1` to `enabled=0`.
+
+## Removing repositories
+
+Completely remove a Copr repository:
+
+```bash
+sudo dnf copr remove user/project
+```
+
+Or delete the repository file manually:
+
+```bash
+sudo rm /etc/yum.repos.d/_copr:copr.fedorainfracloud.org:user:project.repo
+```
+
+## Searching Copr repositories
+
+Search for projects on Copr:
+
+```bash
+dnf copr search keyword
+```
+
+Example:
+```bash
+dnf copr search neovim
+```
+
+## Using different Copr instances
+
+Copr has multiple instances. The default is Fedora Copr, but you can use others:
+
+### openEuler Copr
+
+```bash
+sudo dnf copr enable --hub eur.openeuler.openatom.cn user/project
+```
+
+### Custom Copr instance
+
+```bash
+sudo dnf copr enable --hub https://copr.example.com user/project
+```
+
+## Security considerations
+
+<Warning>
+Copr repositories are user-maintained and not part of official distribution repositories. Only enable repositories from trusted sources.
+</Warning>
+
+### Verifying trust
+
+- Check the project owner's FAS account
+- Review the project description and homepage
+- Examine build logs and SRPM sources
+- Look for community feedback or known users
+
+### GPG signature verification
+
+Copr automatically signs all packages. GPG verification is enabled by default (`gpgcheck=1`).
+
+The GPG key is automatically imported when you enable the repository.
+
+### Inspect packages before installation
+
+View package information:
+
+```bash
+dnf info package-name
+```
+
+Check package vendor:
+```bash
+rpm -qi package-name | grep Vendor
+```
+
+Example output:
+```
+Vendor      : Fedora Copr - user username
+```
+
+## Troubleshooting
+
+### Repository not found
+
+If `dnf copr enable` fails:
+
+1. Verify the project name is correct
+2. Check if the project exists on copr.fedorainfracloud.org
+3. Ensure your OS version has a matching chroot
+
+### GPG key issues
+
+If you see GPG key errors:
+
+```bash
+# Import the key manually
+sudo rpm --import https://download.copr.fedorainfracloud.org/results/user/project/pubkey.gpg
+```
+
+### Repository unavailable
+
+If the repository is temporarily unavailable, `skip_if_unavailable=True` prevents DNF from failing. You can continue using other repositories.
+
+### Conflicting packages
+
+If Copr packages conflict with distribution packages:
+
+```bash
+# Remove the Copr package
+sudo dnf remove package-name
+
+# Reinstall from distribution repos
+sudo dnf distro-sync package-name
+```
+
+### Repository caching
+
+If you don't see new packages immediately:
+
+```bash
+# Clear DNF cache
+sudo dnf clean all
+sudo dnf makecache
+```
+
+## Example workflows
+
+### Installing a development version
+
+```bash
+# Enable the development repository
+sudo dnf copr enable user/myapp:custom:devel
+
+# Install the package
+sudo dnf install myapp
+```
+
+### Testing a pull request build
+
+```bash
+# Enable the PR subproject
+sudo dnf copr enable user/project:pr:123
+
+# Install and test
+sudo dnf install package-name
+```
+
+### Switching between stable and testing
+
+```bash
+# Use stable
+sudo dnf copr enable user/project
+sudo dnf install myapp
+
+# Switch to testing
+sudo dnf copr disable user/project
+sudo dnf copr enable user/project:custom:testing
+sudo dnf upgrade myapp
+```
+
+## Repository file locations
+
+Repository files are stored in:
+
+- Fedora/RHEL/CentOS: `/etc/yum.repos.d/`
+- Repository files follow the pattern: `_copr:copr.fedorainfracloud.org:user:project.repo`
+
+## Best practices
+
+<Accordion title="Keep repositories organized">
+Disable or remove repositories you're not actively using to reduce metadata download time:
+
+```bash
+sudo dnf copr disable user/unused-project
+```
+</Accordion>
+
+<Accordion title="Pin important packages">
+If you rely on specific Copr packages, consider using version locks:
+
+```bash
+sudo dnf install python3-dnf-plugin-versionlock
+sudo dnf versionlock add package-name
+```
+</Accordion>
+
+<Accordion title="Review updates carefully">
+Before upgrading packages from Copr repositories, check the changelog:
+
+```bash
+dnf updateinfo list --repo="copr:*"
+```
+</Accordion>
+
+<Accordion title="Document enabled repositories">
+Keep track of which Copr repositories you have enabled:
+
+```bash
+dnf repolist | grep copr
+```
+</Accordion>

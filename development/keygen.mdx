@@ -1,0 +1,530 @@
+---
+title: Keygen Component
+description: GPG key generation and management service for package signing
+---
+
+## Overview
+
+The **copr-keygen** component is a Flask-based microservice that generates and manages GPG keys for signing packages. It provides:
+
+- On-demand GPG key pair generation
+- Secure key and passphrase storage
+- Integration with obs-signd for package signing
+- Key prolongation and maintenance
+
+<Accordion title="Key Technologies">
+- **Framework**: Flask (Python 3)
+- **Web Server**: Apache httpd with mod_wsgi
+- **GPG**: GnuPG 2.x for key operations
+- **Signing**: obs-signd (Open Build Service sign daemon)
+- **Entropy**: haveged for key generation
+</Accordion>
+
+## Architecture
+
+```
+┌──────────────┐
+│   Backend    │ requests key generation
+└──────┬───────┘
+       │ HTTP POST /gen_key
+       ▼
+┌────────────────────────────────────────┐
+│         Copr Keygen (Flask)            │
+│                                        │
+│  ┌──────────────────────────────────┐ │
+│  │   /gen_key endpoint              │ │
+│  │   - Generate GPG key pair        │ │
+│  │   - Store passphrase             │ │
+│  └──────────────────────────────────┘ │
+│                                        │
+│  ┌──────────────────────────────────┐ │
+│  │   GPG Operations                 │ │
+│  │   - gpg --gen-key               │ │
+│  │   - gpg --export                │ │
+│  └──────────────────────────────────┘ │
+└───────┬────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────┐
+│  Storage                            │
+│  ├─ /var/lib/copr-keygen/gnupg/   │
+│  │  └─ GPG keyrings                │
+│  └─ /var/lib/copr-keygen/phrases/ │
+│     └─ Passphrases (encrypted)     │
+└─────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────┐
+│  obs-signd                          │
+│  - Reads passphrases                │
+│  - Signs RPM packages               │
+└─────────────────────────────────────┘
+```
+
+## Directory Structure
+
+```
+keygen/
+├── src/
+│   └── copr_keygen/        # Main Python package
+│       ├── __init__.py     # Flask app and routes
+│       ├── logic.py        # Key generation logic
+│       ├── util.py         # Helper functions
+│       ├── exceptions.py   # Custom exceptions
+│       └── default_settings.py  # Configuration defaults
+├── run/                    # Executable scripts
+│   ├── application.py      # WSGI entry point
+│   ├── gpg-copr           # GPG wrapper script
+│   ├── gpg-copr-prolong   # Key expiration extension
+│   └── gpg_copr.sh        # Helper script
+├── configs/                # Configuration files
+│   ├── local_settings.py.example
+│   ├── httpd/             # Apache configuration
+│   ├── sign/              # obs-signd configuration
+│   └── cron.daily/        # Maintenance scripts
+└── docs/                   # Documentation
+    ├── INSTALL.rst
+    └── README.rst
+```
+
+## API Endpoints
+
+<Accordion title="REST API">
+### Health Check
+
+```bash
+GET /ping
+
+Response:
+  200 OK
+  pong
+```
+
+### Generate Key
+
+```bash
+POST /gen_key
+Content-Type: application/json
+
+{
+  "name_real": "@copr/copr-dev",
+  "name_email": "copr-devel#@copr@copr.fedorahosted.org",
+  "name_comment": "Copr build system",
+  "key_length": 2048,
+  "expire": 0
+}
+
+Response:
+  201 Created  - Key generated successfully
+  200 OK       - Key already exists
+  400 Bad Request - Invalid parameters
+  500 Internal Server Error - Generation failed
+```
+
+### Parameters
+
+- `name_real` (required): Key owner name (project)
+- `name_email` (required): Key identifier (must be unique)
+- `name_comment` (optional): Additional description
+- `key_length` (optional): 2048 or 4096 bits (default: 2048)
+- `expire` (optional): Expiration in days (0 = never, default: 0)
+</Accordion>
+
+## Key Generation Process
+
+<Accordion title="Step-by-Step">
+### 1. Validate Request
+
+```python
+def validate_name_email(name_email):
+    # Must match: username#project@owner
+    pattern = r'^[a-zA-Z0-9._-]+#[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+$'
+    return re.match(pattern, name_email)
+```
+
+### 2. Check if Key Exists
+
+```python
+def user_exists(app, name_email):
+    # Try to export existing key
+    cmd = [
+        'gpg',
+        '--homedir', app.config['GPG_HOMEDIR'],
+        '--export',
+        '--armor',
+        name_email,
+    ]
+    result = subprocess.run(cmd, capture_output=True)
+    return result.returncode == 0
+```
+
+### 3. Generate Key Pair
+
+```python
+def create_new_key(app, name_real, name_email, key_length=2048, expire=0):
+    # Generate random passphrase
+    passphrase = generate_passphrase(32)
+    
+    # Create GPG batch file
+    batch = f"""
+    %no-protection
+    Key-Type: RSA
+    Key-Length: {key_length}
+    Name-Real: {name_real}
+    Name-Email: {name_email}
+    Expire-Date: {expire}d
+    Passphrase: {passphrase}
+    %commit
+    """
+    
+    # Generate key
+    cmd = [
+        'gpg',
+        '--homedir', app.config['GPG_HOMEDIR'],
+        '--batch',
+        '--gen-key',
+    ]
+    subprocess.run(cmd, input=batch.encode(), check=True)
+    
+    # Store passphrase
+    passphrase_file = get_passphrase_location(app, name_email)
+    with open(passphrase_file, 'w') as f:
+        f.write(passphrase)
+    os.chmod(passphrase_file, 0o600)
+```
+
+### 4. Export Public Key
+
+```python
+# Export to results directory for distribution
+cmd = [
+    'gpg',
+    '--homedir', app.config['GPG_HOMEDIR'],
+    '--export',
+    '--armor',
+    name_email,
+]
+result = subprocess.run(cmd, capture_output=True, check=True)
+pubkey = result.stdout.decode('utf-8')
+
+# Save to file
+with open(f'/var/lib/copr/public_html/results/{owner}/{project}/pubkey.gpg', 'w') as f:
+    f.write(pubkey)
+```
+</Accordion>
+
+## File Storage
+
+<Accordion title="Storage Layout">
+```
+/var/lib/copr-keygen/
+├── gnupg/                  # GPG home directory (mode 0700)
+│   ├── pubring.kbx        # Public keyring
+│   ├── private-keys-v1.d/ # Private keys
+│   ├── trustdb.gpg        # Trust database
+│   └── gpg.conf           # GPG configuration
+└── phrases/                # Passphrases (mode 0700)
+    ├── project1#pkg@owner.pass
+    ├── project2#pkg@owner.pass
+    └── *.pass.lock         # Lock files
+```
+
+### File Permissions
+
+```bash
+# All owned by copr-signer:copr-signer
+drwx------ copr-signer copr-signer /var/lib/copr-keygen/
+drwx------ copr-signer copr-signer /var/lib/copr-keygen/gnupg/
+drwx------ copr-signer copr-signer /var/lib/copr-keygen/phrases/
+-rw------- copr-signer copr-signer *.pass
+```
+</Accordion>
+
+## Configuration
+
+<Accordion title="/etc/copr-keygen/local_settings.py">
+```python
+# GPG settings
+GPG_HOMEDIR = "/var/lib/copr-keygen/gnupg"
+PHRASE_DIR = "/var/lib/copr-keygen/phrases"
+GPG_KEY_LENGTH = 2048  # or 4096
+GPG_EXPIRE = 0  # days, 0 = never
+
+# Logging
+LOG_DIR = "/var/log/copr-keygen"
+LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
+
+# Flask
+DEBUG = False
+DEBUG_WITH_LOG = True  # Log even in debug mode
+```
+</Accordion>
+
+## obs-signd Integration
+
+<Accordion title="Package Signing Configuration">
+### Sign Configuration (`/etc/sign.conf`)
+
+```bash
+# Server running copr-keygen
+server: copr-keygen.example.com
+
+# GPG settings
+gnupg: /usr/bin/gpg2
+phrase: /var/lib/copr-keygen/phrases/%{project}.pass
+
+# Allow copr user to call sign command
+allowuser: copr
+
+# Logging
+logfile: /var/log/signd.log
+```
+
+### Signing Process
+
+```bash
+# Backend calls sign command (via sudo)
+sudo /usr/bin/sign -p /path/to/phrase.pass package.rpm
+
+# obs-signd:
+# 1. Reads passphrase from phrase file
+# 2. Calls gpg with passphrase
+# 3. Signs RPM with project's GPG key
+# 4. Returns signed RPM
+```
+
+### sudoers Configuration
+
+```bash
+# /etc/sudoers.d/copr_signer
+Defaults:copr !requiretty
+copr ALL=(copr-signer) NOPASSWD: /usr/bin/sign
+copr ALL=(copr-signer) NOPASSWD: /usr/bin/gpg2
+copr ALL=(copr-signer) NOPASSWD: /usr/bin/rpm
+```
+</Accordion>
+
+## Key Maintenance
+
+<Accordion title="Key Prolongation">
+### Automatic Expiration Extension
+
+Daily cron job extends key expiration:
+
+```bash
+# /etc/cron.daily/copr-keygen
+#!/bin/bash
+# Extend expiration for all keys to 5 years
+gpg-copr-prolong 1825
+```
+
+### gpg-copr-prolong Script
+
+```bash
+#!/bin/bash
+DAYS=${1:-1825}  # Default: 5 years
+
+# For each key in keyring
+gpg --homedir /var/lib/copr-keygen/gnupg --list-keys --with-colons | \
+grep '^pub' | \
+cut -d: -f5 | \
+while read keyid; do
+    # Extend expiration
+    gpg --homedir /var/lib/copr-keygen/gnupg \
+        --quick-set-expire "$keyid" "${DAYS}d"
+done
+
+# Rebuild trust database
+gpg --homedir /var/lib/copr-keygen/gnupg --check-trustdb
+```
+
+### Trust Database Maintenance
+
+```bash
+# Daily maintenance to prevent blocking
+gpg --homedir /var/lib/copr-keygen/gnupg \
+    --no-auto-check-trustdb \
+    --batch \
+    --check-trustdb
+```
+</Accordion>
+
+## Apache/WSGI Configuration
+
+<Accordion title="Web Server Setup">
+### Apache Configuration
+
+```apache
+# /etc/httpd/conf.d/copr-keygen.conf
+WSGISocketPrefix /var/run/wsgi
+
+<VirtualHost *:80>
+    ServerName copr-keygen.example.com
+    
+    WSGIDaemonProcess copr-keygen \
+        user=copr-signer \
+        group=copr-signer \
+        processes=4 \
+        threads=1 \
+        display-name=copr-keygen
+    
+    WSGIScriptAlias / /usr/share/copr-keygen/application.py
+    
+    <Directory /usr/share/copr-keygen>
+        WSGIProcessGroup copr-keygen
+        WSGIApplicationGroup %{GLOBAL}
+        Require all granted
+    </Directory>
+    
+    ErrorLog /var/log/httpd/copr-keygen-error.log
+    CustomLog /var/log/httpd/copr-keygen-access.log combined
+</VirtualHost>
+```
+
+### WSGI Entry Point
+
+```python
+# /usr/share/copr-keygen/application.py
+import sys
+import os
+
+sys.path.insert(0, '/usr/lib/python3.11/site-packages')
+
+from copr_keygen import app as application
+
+# Load custom configuration
+application.config.from_envvar('COPR_KEYGEN_CONFIG', silent=False)
+```
+</Accordion>
+
+## Security Considerations
+
+<Accordion title="Security Best Practices">
+### File Permissions
+
+```bash
+# Restrict access to sensitive directories
+chmod 0700 /var/lib/copr-keygen/gnupg
+chmod 0700 /var/lib/copr-keygen/phrases
+chown -R copr-signer:copr-signer /var/lib/copr-keygen
+
+# Lock files during operations
+flock /var/lib/copr-keygen/phrases/project.pass.lock \
+  operation_on_passphrase
+```
+
+### Process Isolation
+
+- Runs as dedicated `copr-signer` user
+- No shell access for copr-signer user
+- Sudo access strictly limited to signing operations
+- SELinux policies restrict file access
+
+### Passphrase Generation
+
+```python
+import secrets
+import string
+
+def generate_passphrase(length=32):
+    """Generate cryptographically secure random passphrase"""
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+```
+
+### Network Restrictions
+
+- Listen only on internal network
+- Backend authenticates with token/password
+- No public access to keygen service
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Common Issues">
+### Key Generation Hangs
+
+**Problem**: `gpg --gen-key` blocks waiting for entropy
+```
+Not enough random bytes available. Please do some other work...
+```
+**Solution**: Install and start haveged
+```bash
+dnf install haveged
+systemctl enable --now haveged
+```
+
+### Permission Denied Errors
+
+**Problem**: Cannot write to gnupg directory
+```
+gpg: can't create directory '/var/lib/copr-keygen/gnupg': Permission denied
+```
+**Solution**: Fix ownership and permissions
+```bash
+chown -R copr-signer:copr-signer /var/lib/copr-keygen
+chmod 0700 /var/lib/copr-keygen/gnupg
+```
+
+### Trust Database Corruption
+
+**Problem**: gpg reports trust database errors
+```
+gpg: error updating trustdb: file has been tampered with
+```
+**Solution**: Rebuild trust database
+```bash
+gpg --homedir /var/lib/copr-keygen/gnupg --rebuild-keydb-caches
+gpg --homedir /var/lib/copr-keygen/gnupg --check-trustdb
+```
+
+### obs-signd Not Signing
+
+**Problem**: Signing fails with authentication error
+```
+ERROR: Failed to sign package
+```
+**Solution**: Check passphrase file and sign.conf
+```bash
+# Verify passphrase file exists and is readable
+ls -la /var/lib/copr-keygen/phrases/project.pass
+
+# Test signing manually
+sudo -u copr-signer /usr/bin/sign -p /var/lib/copr-keygen/phrases/project.pass test.rpm
+```
+</Accordion>
+
+## Logging
+
+<Accordion title="Log Files">
+- **Application log**: `/var/log/copr-keygen/main.log`
+- **Apache error log**: `/var/log/httpd/copr-keygen-error.log`
+- **Apache access log**: `/var/log/httpd/copr-keygen-access.log`
+- **Sign daemon log**: `/var/log/signd.log`
+
+### Log Format
+
+```
+2026-02-28 15:30:45,123 INFO [logic][/gen_key][192.168.1.10]: \
+  Generating key for project#pkg@owner
+2026-02-28 15:30:55,234 INFO [logic][/gen_key][192.168.1.10]: \
+  Key generated successfully
+```
+</Accordion>
+
+## Dependencies
+
+### Core Packages
+- `python3-flask` - Web framework
+- `python3-copr-common` - Shared utilities
+- `gnupg2` - GPG key operations
+- `obs-signd` - Package signing
+- `python3-mod_wsgi` - WSGI interface
+- `httpd` - Apache web server
+- `haveged` - Entropy generation
+
+## See Also
+
+- [Backend Component](/development/backend)
+- [GPG Documentation](https://gnupg.org/documentation/)
+- [obs-signd Documentation](https://github.com/openSUSE/obs-sign)

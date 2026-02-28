@@ -1,0 +1,180 @@
+---
+title: Webhook Endpoints
+description: Manage webhook secrets for automated builds
+---
+
+## Overview
+
+Webhooks allow external services (GitHub, GitLab, Pagure, etc.) to trigger automatic rebuilds when source code changes. To use webhooks securely, you need to generate a webhook secret for your project.
+
+### Webhook URL Format
+
+Once you have a webhook secret, configure your Git hosting service to send webhooks to:
+
+```
+https://copr.fedorainfracloud.org/webhooks/{ownername}/{projectname}/{webhook_secret}/
+```
+
+### Supported Services
+
+- **GitHub** - Push events and pull requests
+- **GitLab** - Push events and merge requests  
+- **Pagure** - Push events and pull requests
+- **Bitbucket** - Push events
+
+---
+
+## Generate Webhook Secret
+
+<CodeGroup>
+```bash POST /api_3/webhook/generate/<ownername>/<projectname>
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/webhook/generate/myuser/my-project"
+```
+</CodeGroup>
+
+Generate a new webhook secret for a project. Requires authentication and edit permissions.
+
+<Warning>
+  This generates a new secret and invalidates any previous webhook secret. You'll need to update webhook configurations in your Git hosting service.
+</Warning>
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name (username or @groupname)
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="integer">
+  Project ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Project name
+</ResponseField>
+
+<ResponseField name="ownername" type="string">
+  Project owner name
+</ResponseField>
+
+<ResponseField name="full_name" type="string">
+  Full project name (ownername/projectname)
+</ResponseField>
+
+<ResponseField name="webhook_secret" type="string">
+  The generated webhook secret token
+</ResponseField>
+
+<ResponseExample>
+```json
+{
+  "id": 12345,
+  "name": "my-project",
+  "ownername": "myuser",
+  "full_name": "myuser/my-project",
+  "webhook_secret": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
+}
+```
+</ResponseExample>
+
+---
+
+## Configuring Webhooks
+
+### Prerequisites
+
+1. Generate a webhook secret using the endpoint above
+2. Enable webhook rebuilds for packages in your project
+3. Configure the webhook in your Git hosting service
+
+### Package Configuration
+
+For webhooks to trigger builds, packages must have `webhook_rebuild` enabled:
+
+<CodeGroup>
+```bash Enable webhook rebuilds
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/package/edit/myuser/my-project/my-package" \
+  -H "Content-Type: application/json" \
+  -d '{"webhook_rebuild": true}'
+```
+</CodeGroup>
+
+See the [Package Endpoints](/api/packages) documentation for more details.
+
+### GitHub Configuration
+
+1. Go to your repository Settings → Webhooks → Add webhook
+2. Set **Payload URL** to: `https://copr.fedorainfracloud.org/webhooks/{ownername}/{projectname}/{webhook_secret}/`
+3. Set **Content type** to: `application/json`
+4. Select events: **Just the push event** (or **Pull requests** if desired)
+5. Click **Add webhook**
+
+### GitLab Configuration
+
+1. Go to your project Settings → Webhooks
+2. Set **URL** to: `https://copr.fedorainfracloud.org/webhooks/{ownername}/{projectname}/{webhook_secret}/`
+3. Select **Push events** (and **Merge request events** if desired)
+4. Click **Add webhook**
+
+### Pagure Configuration
+
+1. Go to your project Settings → Webhooks
+2. Set **URL** to: `https://copr.fedorainfracloud.org/webhooks/{ownername}/{projectname}/{webhook_secret}/`
+3. Select **Push** events
+4. Click **Add webhook**
+
+---
+
+## Webhook Behavior
+
+When a webhook is received:
+
+1. Copr verifies the webhook secret matches
+2. Copr identifies affected packages based on the repository URL
+3. For each package with `webhook_rebuild` enabled:
+   - A new build is automatically submitted
+   - The build uses the package's configured source settings
+   - The build targets all enabled chroots in the project
+
+<Note>
+  Webhook-triggered builds are marked as background builds by default to avoid cluttering the main build list.
+</Note>
+
+---
+
+## Security Considerations
+
+- **Keep webhook secrets confidential** - Anyone with the secret can trigger builds
+- **Rotate secrets regularly** - Use the generate endpoint to create new secrets
+- **Enable webhook verification** - Configure your Git hosting to verify SSL certificates
+- **Monitor webhook activity** - Check build logs for unexpected automated builds
+
+---
+
+## Troubleshooting
+
+### Webhook not triggering builds
+
+- Verify the webhook secret is correct in your Git hosting configuration
+- Ensure the package has `webhook_rebuild` set to `true`
+- Check that the repository URL in the package configuration matches the webhook source
+- Review webhook delivery logs in your Git hosting service
+
+### Multiple packages being built
+
+If multiple packages share the same repository URL and have webhooks enabled, all will be rebuilt when the webhook fires. This is intentional for monorepo scenarios.
+
+### Build errors
+
+Webhook-triggered builds use the package's configured source settings. If builds fail:
+
+- Verify the package source configuration is correct
+- Check that the `committish` field matches your default branch
+- Review build logs for specific errors

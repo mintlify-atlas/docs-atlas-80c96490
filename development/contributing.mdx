@@ -1,0 +1,333 @@
+---
+title: Contributing to Copr
+description: Guidelines and standards for contributing code to the Copr project
+---
+
+## Getting Started
+
+We welcome contributions to Copr! Whether you're fixing bugs, adding features, improving documentation, or helping others, your contributions are valuable.
+
+### Ways to Contribute
+
+- **Code contributions**: Fix bugs, add features, refactor code
+- **Documentation**: Write guides, improve existing docs
+- **Scripts and tools**: Share useful scripts using Copr API
+- **Help others**: Answer questions on IRC or mailing lists
+- **Testing**: Run tests, report bugs, verify fixes
+
+## Source Code
+
+The main Copr repository:
+
+```bash
+git clone https://github.com/fedora-copr/copr.git
+cd copr
+```
+
+Project organization:
+
+- `frontend/` - Web UI and API (Flask application)
+- `backend/` - Build orchestration and execution
+- `distgit/` - Source caching service
+- `keygen/` - GPG key management and signing
+- `rpmbuild/` - Package building logic
+- `cli/` - Command-line interface
+- `python/` - Python API client library
+- `common/` - Shared code between components
+
+## Coding Standards
+
+All Copr developers have agreed to comply with the following standards. In case of controversy, these rules take precedence over personal preference.
+
+### PEP8 Compliance
+
+All new code must be [PEP8](https://www.python.org/dev/peps/pep-0008/) compliant.
+
+**Exceptions** are allowed only when:
+
+1. The violation is uniformly approved by the team
+2. The code contains a comment to disable Pylint warning:
+
+```python
+# pylint: disable=W0703
+try:
+    risky_operation()
+except Exception as e:  # pylint: disable=W0703
+    log_error(e)
+```
+
+### Docstring Style
+
+Although PEP8 permits multiple docstring styles, Copr uses **triple-quotes** for all docstrings:
+
+**Multi-line docstrings:**
+
+```python
+def complex_function(param1, param2):
+    """
+    This is an example docstring
+    having more than just one line
+    """
+    pass
+```
+
+**Single-line docstrings** (still use triple-quotes):
+
+```python
+def simple_function():
+    """Return the pathname of the KOS root directory."""
+    return "/var/lib/kos"
+```
+
+### Database Schema
+
+Every database table must have:
+
+- An **autoincrement integer primary key** named `id`
+- This applies even when the ID value is not used
+
+**Rationale**: Primary keys are required for First Normal Form compliance. Numeric primary keys are a team convention for consistency.
+
+```python
+class Project(db.Model):
+    id = db.Column(db.Integer, primary_key=True)  # Required
+    name = db.Column(db.String(100), nullable=False)
+    # ... other fields
+```
+
+### Naming Conventions
+
+For consistency, we follow these naming patterns:
+
+**`*_safe` methods**: Methods considered "safe from exceptions"
+
+```python
+def delete_project_safe(project_id):
+    """
+    Delete a project, handling exceptions properly.
+    Logs errors instead of raising them.
+    """
+    try:
+        project = Project.query.get(project_id)
+        db.session.delete(project)
+        db.session.commit()
+    except Exception as e:
+        log.error(f"Failed to delete project: {e}")
+```
+
+**`*_or_none` methods**: Return desired output or `None` if not found
+
+```python
+def get_project_or_none(project_id):
+    """
+    Return project if found, None otherwise.
+    Does not raise exceptions for missing objects.
+    """
+    return Project.query.get(project_id)  # Returns None if not found
+```
+
+## Testing Your Changes
+
+### Unit Tests
+
+Run unit tests before committing changes to any component:
+
+**Frontend tests:**
+
+```bash
+cd frontend
+dnf builddep copr-frontend.spec  # Install dependencies
+./run_tests.sh
+```
+
+**Backend tests:**
+
+```bash
+cd backend
+dnf builddep copr-backend.spec
+./run_tests.sh
+```
+
+### Behavioral Tests
+
+Copr has three behavioral test suites:
+
+- Integration tests
+- Backend tests  
+- DistGit tests
+
+These tests verify functionality before releases.
+
+**Example: Running DistGit tests:**
+
+<Steps>
+  <Step title="Navigate to test environment">
+    ```bash
+    cd beaker-tests/DockerTestEnv
+    ```
+  </Step>
+
+  <Step title="Build and run test container">
+    ```bash
+    make && make run
+    ```
+  </Step>
+
+  <Step title="Enter the container">
+    ```bash
+    make sh
+    ```
+  </Step>
+
+  <Step title="Run the test suite">
+    ```bash
+    cd copr/beaker-tests/Regression/dist-git
+    ./runtest.sh
+    ```
+    
+    You should see GREEN checks saying "PASS" for successful tests.
+  </Step>
+</Steps>
+
+### Testing in Docker Environment
+
+After making changes to frontend or backend:
+
+1. **Restart the respective container** for changes to take effect
+2. **Check logs** for errors:
+
+```bash
+# Frontend logs
+docker exec -it copr_frontend_1 bash
+tail -f /var/log/httpd/error_log
+
+# Backend logs  
+docker exec -it copr_backend-build_1 bash
+tail -f /var/log/copr-backend/backend.log
+```
+
+3. **Test via Web UI**: Navigate to http://localhost:5000
+4. **Test via API**: Use `copr-cli` or curl
+
+See the [local setup guide](/development/local-setup) for more details.
+
+## Submitting Changes
+
+### Git Workflow
+
+<Steps>
+  <Step title="Create a feature branch">
+    ```bash
+    git checkout -b fix-issue-1234
+    ```
+  </Step>
+
+  <Step title="Make your changes">
+    Follow the coding standards above. Add tests for new functionality.
+  </Step>
+
+  <Step title="Run tests">
+    ```bash
+    ./run_tests.sh
+    ```
+  </Step>
+
+  <Step title="Commit with descriptive message">
+    ```bash
+    git add .
+    git commit -m "Fix race condition in builder allocation
+    
+    Resolves: #1234"
+    ```
+  </Step>
+
+  <Step title="Push and create pull request">
+    ```bash
+    git push origin fix-issue-1234
+    ```
+    
+    Then open a pull request on GitHub.
+  </Step>
+</Steps>
+
+### Pull Request Guidelines
+
+- **Title**: Clear, concise description of the change
+- **Description**: Explain what changed and why
+- **Reference issues**: Use "Fixes #123" or "Resolves #456"
+- **Tests**: Include tests for new features or bug fixes
+- **Documentation**: Update docs if behavior changes
+- **Commits**: Keep commits focused and well-documented
+
+### Alternative: Patch Submission
+
+If you prefer sending patches instead of pull requests, see the [patch process documentation](https://docs.pagure.org/copr.copr/developer_documentation/patch_process.html).
+
+## Building Packages
+
+When working on Copr components, you may need to build packages locally:
+
+```bash
+# Install build dependencies
+dnf builddep copr-frontend.spec
+
+# Build RPM
+rpmbuild -bb copr-frontend.spec
+
+# Test installation
+dnf install ~/rpmbuild/RPMS/noarch/copr-frontend-*.rpm
+```
+
+For more details, see [Building Copr Packages](https://docs.pagure.org/copr.copr/developer_documentation/building_package.html).
+
+## Documentation
+
+We need help with:
+
+- **Code documentation**: Add docstrings to undocumented functions
+- **User guides**: Write tutorials and how-to guides  
+- **Developer docs**: Document architecture, workflows, and design decisions
+- **API documentation**: Keep API docs in sync with code
+- **Updating outdated docs**: Review and refresh existing documentation
+
+**Contribution tip**: If you struggle to find documentation for a task, create it! Document what you learned so others benefit.
+
+## Getting Help
+
+### Communication Channels
+
+- **GitHub Issues**: https://github.com/fedora-copr/copr/issues
+- **Bugzilla**: Report bugs at https://bugzilla.redhat.com/enter_bug.cgi?product=Copr
+- **Mailing List**: copr-devel@lists.fedorahosted.org
+- **IRC**: #fedora-buildsys on Libera.Chat
+- **Matrix**: Bridged to IRC channel
+
+### Before Asking
+
+1. Check existing documentation
+2. Search closed issues and pull requests
+3. Review the code (it's often the best documentation)
+4. Run tests to understand expected behavior
+
+## Security Issues
+
+If you discover a security vulnerability:
+
+1. **Do NOT open a public issue**
+2. Report privately via [GitHub Security Advisories](https://github.com/fedora-copr/copr/security)
+3. Include details about the vulnerability and steps to reproduce
+4. Allow time for the team to address the issue before public disclosure
+
+## Code of Conduct
+
+Be respectful, constructive, and collaborative. We're all working together to make Copr better.
+
+## Recognition
+
+Contributors are recognized in:
+
+- Git commit history
+- Release notes for significant contributions
+- Project README and documentation
+
+Thank you for contributing to Copr!

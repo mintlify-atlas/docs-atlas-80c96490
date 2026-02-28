@@ -1,0 +1,324 @@
+---
+title: Configuration
+description: Configure copr-cli with API tokens and authentication
+---
+
+## Configuration File Location
+
+The copr-cli configuration file is located at:
+
+```bash
+~/.config/copr
+```
+
+You can override this location using the `--config` flag:
+
+```bash
+copr-cli --config /path/to/config list
+```
+
+## Obtaining API Token
+
+To use copr-cli, you need an API token from the Copr service.
+
+### For Fedora Copr
+
+1. Visit [https://copr.fedorainfracloud.org/api/](https://copr.fedorainfracloud.org/api/)
+2. Log in with your Fedora Account
+3. Copy the configuration snippet provided on the page
+4. Save it to `~/.config/copr`
+
+### For Custom Copr Instance
+
+1. Visit `https://YOUR.COPR.URL/api/`
+2. Log in to your account
+3. Copy the configuration snippet
+4. Save it to `~/.config/copr` or a custom location
+
+## Configuration Format
+
+The configuration file uses INI format:
+
+```ini ~/.config/copr
+[copr-cli]
+username = msuchy
+login = Y57wcg==##fkfaxbkjhuoiebfafadl
+token = vbfseelqdebzedukgombekmuvbkqwo
+copr_url = https://copr.fedorainfracloud.org
+# expiration date: 2026-01-01
+```
+
+<Warning>
+Be aware that API tokens have an expiration date! You'll need to regenerate them periodically.
+</Warning>
+
+## Configuration Parameters
+
+<ParamField path="username" type="string" required>
+  Your Copr username
+</ParamField>
+
+<ParamField path="login" type="string" required>
+  Base64-encoded login credential from the API page
+</ParamField>
+
+<ParamField path="token" type="string" required>
+  API token for authentication
+</ParamField>
+
+<ParamField path="copr_url" type="string" required>
+  URL of the Copr instance (default: https://copr.fedorainfracloud.org)
+</ParamField>
+
+## Setting Up Configuration
+
+### Create Configuration Directory
+
+```bash
+# Create config directory if it doesn't exist
+mkdir -p ~/.config
+```
+
+### Copy Configuration
+
+```bash
+# Visit the API page and copy the config
+# Then save it to the config file
+cat > ~/.config/copr << 'EOF'
+[copr-cli]
+username = your_username
+login = your_login_token
+token = your_api_token
+copr_url = https://copr.fedorainfracloud.org
+EOF
+```
+
+### Set File Permissions
+
+```bash
+# Protect your API token
+chmod 600 ~/.config/copr
+```
+
+## Verifying Configuration
+
+Test that your configuration is working:
+
+```bash
+# Check your authenticated username
+copr-cli whoami
+```
+
+Expected output:
+```
+your_username
+```
+
+If you see your username, the configuration is correct!
+
+## Authentication Methods
+
+copr-cli supports two authentication methods:
+
+### 1. Token-Based Authentication (Default)
+
+Uses the `login` and `token` values from the configuration file.
+
+**Advantages:**
+- Simple to set up
+- Works on all systems
+- Doesn't require additional packages
+
+**Configuration:**
+```ini
+[copr-cli]
+username = your_username
+login = your_login_token
+token = your_api_token
+copr_url = https://copr.fedorainfracloud.org
+```
+
+### 2. GSSAPI/Kerberos Authentication
+
+Uses Kerberos tickets for authentication (enabled by default for Fedora Copr).
+
+**Advantages:**
+- No API token expiration
+- Single sign-on with Fedora Account
+- More secure for enterprise environments
+
+**Setup for Fedora Copr:**
+
+```bash
+# Install required packages
+sudo dnf install krb5-workstation
+
+# Obtain Kerberos ticket
+fkinit
+# Enter your password and OTP concatenated
+Enter OTP Token Value: <your password + OTP token>
+```
+
+**Minimal Configuration:**
+```ini
+[copr-cli]
+copr_url = https://copr.fedorainfracloud.org
+# GSSAPI is enabled by default
+```
+
+**For Custom Kerberos Realms:**
+```bash
+kinit username@EXAMPLE.COM
+```
+
+```ini
+[copr-cli]
+copr_url = https://copr.example.com/
+gssapi = True
+```
+
+## Regenerating API Token
+
+API tokens expire periodically. To generate a new token:
+
+### Method 1: Using Web Interface
+
+1. Visit the API page: https://copr.fedorainfracloud.org/api/
+2. Click "Regenerate token"
+3. Copy the new configuration to `~/.config/copr`
+
+### Method 2: Using CLI
+
+```bash
+# Regenerate and update token automatically
+copr-cli new-api-token
+```
+
+Output:
+```
+New API token was updated in /home/user/.config/copr.
+```
+
+<Warning>
+The `new-api-token` command destroys your old token! Any other applications using the old token will stop working.
+</Warning>
+
+## Multiple Copr Instances
+
+If you work with multiple Copr instances, create separate configuration files:
+
+```bash
+# Fedora Copr (default)
+~/.config/copr
+
+# Custom instance
+~/.config/copr-custom
+```
+
+Use shell aliases for convenience:
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+alias copr='copr-cli --config ~/.config/copr'
+alias copr-custom='copr-cli --config ~/.config/copr-custom'
+```
+
+Or use the `--config` flag:
+
+```bash
+copr-cli --config ~/.config/copr-custom list
+```
+
+## Advanced Configuration Options
+
+### Disable GSSAPI
+
+If you want to disable GSSAPI and force token authentication:
+
+```ini
+[copr-cli]
+username = your_username
+login = your_login_token
+token = your_api_token
+copr_url = https://copr.fedorainfracloud.org
+gssapi = False
+```
+
+### Connection Retries
+
+The CLI automatically retries failed connections 3 times. This is hardcoded and cannot be changed via configuration.
+
+### Debug Mode
+
+Enable debug output without modifying the config:
+
+```bash
+copr-cli --debug build myproject package.src.rpm
+```
+
+### Disable Colors
+
+Disable colored output:
+
+```bash
+copr-cli --no-color status 12345
+```
+
+## Troubleshooting
+
+### Error: Configuration file not found
+
+```bash
+# Create the configuration file
+mkdir -p ~/.config
+cat > ~/.config/copr << 'EOF'
+[copr-cli]
+username = your_username
+login = your_login_token
+token = your_api_token
+copr_url = https://copr.fedorainfracloud.org
+EOF
+```
+
+### Error: Authentication failed
+
+1. Check that your token hasn't expired
+2. Regenerate your token: `copr-cli new-api-token`
+3. Or visit https://copr.fedorainfracloud.org/api/ and copy new credentials
+
+### Error: Permission denied
+
+```bash
+# Fix file permissions
+chmod 600 ~/.config/copr
+```
+
+### Error: Can't detect who you are
+
+This means authentication is not configured properly:
+
+1. Ensure `username` is set in config, OR
+2. Enable GSSAPI and obtain Kerberos ticket, OR
+3. Use full project names with `owner/project` format
+
+## Exit Status Codes
+
+copr-cli returns different exit codes based on the result:
+
+| Code | Meaning |
+|------|----------|
+| 0 | Success |
+| 1 | Bad request (wrong project name, insufficient rights, etc.) |
+| 2 | Wrong arguments |
+| 3 | General error |
+| 4 | Build failed or was canceled |
+| 5 | Communication error with server |
+| 6 | Configuration error |
+| 7 | Authentication failed |
+
+## Next Steps
+
+Now that you've configured copr-cli:
+
+- [Commands Reference](/cli/commands) - Learn about available commands
+- [Examples](/cli/examples) - See real-world usage examples

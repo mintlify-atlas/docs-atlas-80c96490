@@ -1,0 +1,185 @@
+---
+title: API Overview
+description: Introduction to Copr API v3, base URL, versioning, and response formats
+---
+
+## Introduction
+
+Copr API v3 is a RESTful API that allows you to programmatically interact with the Copr Build System. You can create projects, submit builds, manage packages, and more.
+
+## Base URL
+
+All API requests should be made to:
+
+```
+https://copr.fedorainfracloud.org/api_3/
+```
+
+## Versioning
+
+The API version is indicated in the URL path (`/api_3/`). This documentation covers version 3 of the Copr API.
+
+## Response Format
+
+All API responses are returned in JSON format. Successful responses follow this structure:
+
+```json
+{
+  "output": "ok",
+  "message": "Description of the result",
+  "data": {
+    // Response data here
+  }
+}
+```
+
+### Success Response Example
+
+<CodeGroup>
+```bash curl
+curl https://copr.fedorainfracloud.org/api_3/project \
+  -G \
+  --data-urlencode "ownername=@copr" \
+  --data-urlencode "projectname=copr-dev"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "https://copr.fedorainfracloud.org/api_3/project",
+    params={
+        "ownername": "@copr",
+        "projectname": "copr-dev"
+    }
+)
+project = response.json()
+```
+</CodeGroup>
+
+Response:
+
+```json
+{
+  "id": 1234,
+  "name": "copr-dev",
+  "ownername": "@copr",
+  "full_name": "@copr/copr-dev",
+  "description": "Copr development packages",
+  "homepage": "https://github.com/fedora-copr/copr",
+  "contact": "copr-devel@lists.fedorahosted.org",
+  "instructions": "dnf copr enable @copr/copr-dev",
+  "devel_mode": false,
+  "persistent": true,
+  "unlisted_on_hp": false,
+  "auto_prune": true
+}
+```
+
+## Error Response Format
+
+Error responses include an error message and appropriate HTTP status code:
+
+```json
+{
+  "output": "notok",
+  "error": "Error description"
+}
+```
+
+### Common HTTP Status Codes
+
+- **200 OK** - Request succeeded
+- **206 Partial Content** - Paginated response, more data available
+- **400 Bad Request** - Invalid request parameters
+- **401 Unauthorized** - Authentication required or failed
+- **403 Forbidden** - Insufficient permissions
+- **404 Not Found** - Resource not found
+
+### Error Response Example
+
+```bash
+curl https://copr.fedorainfracloud.org/api_3/project \
+  -G \
+  --data-urlencode "ownername=nonexistent" \
+  --data-urlencode "projectname=nonexistent"
+```
+
+Response:
+
+```json
+{
+  "output": "notok",
+  "error": "No such Copr project found in database"
+}
+```
+
+## Pagination
+
+Endpoints that return lists support pagination with the following query parameters:
+
+- `limit` - Number of items to return (default varies by endpoint)
+- `offset` - Number of items to skip (default: 0)
+- `order` - Field to order by (e.g., "id", "name")
+- `order_type` - Sort direction: "ASC" or "DESC"
+
+### Pagination Example
+
+```bash
+curl https://copr.fedorainfracloud.org/api_3/build/list \
+  -G \
+  --data-urlencode "ownername=@copr" \
+  --data-urlencode "projectname=copr-dev" \
+  --data-urlencode "limit=10" \
+  --data-urlencode "offset=0" \
+  --data-urlencode "order=id" \
+  --data-urlencode "order_type=DESC"
+```
+
+Paginated responses include metadata:
+
+```json
+{
+  "items": [
+    // Array of results
+  ],
+  "meta": {
+    "limit": 10,
+    "offset": 0,
+    "order": "id",
+    "order_type": "DESC"
+  }
+}
+```
+
+## Interactive Documentation
+
+Copr provides interactive API documentation using Swagger UI:
+
+```
+https://copr.fedorainfracloud.org/api_3/docs/
+```
+
+This interface allows you to explore all available endpoints, view request/response schemas, and test API calls directly from your browser.
+
+## Python Client
+
+For Python developers, we recommend using the official `python-copr` client library:
+
+```bash
+dnf install python3-copr
+# or
+pip install copr
+```
+
+Documentation: [https://python-copr.readthedocs.io](https://python-copr.readthedocs.io)
+
+## Command-Line Interface
+
+The `copr-cli` tool provides a convenient command-line interface:
+
+```bash
+dnf install copr-cli
+```
+
+See `man copr-cli` for detailed usage instructions.

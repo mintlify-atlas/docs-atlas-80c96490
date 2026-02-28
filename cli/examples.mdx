@@ -1,0 +1,846 @@
+---
+title: CLI Examples
+description: Real-world examples and usage patterns for copr-cli
+---
+
+## Getting Started
+
+### Check Authentication
+
+Before starting, verify your authentication is working:
+
+```bash
+# Print your username
+copr-cli whoami
+```
+
+### List Your Projects
+
+```bash
+# List your own projects
+copr-cli list
+
+# List another user's projects
+copr-cli list john
+
+# List group projects
+copr-cli list @python-sig
+```
+
+## Creating and Managing Projects
+
+### Create a Basic Project
+
+```bash
+# Create project with Fedora chroots
+copr-cli create myproject \
+  --chroot fedora-39-x86_64 \
+  --chroot fedora-40-x86_64 \
+  --chroot fedora-rawhide-x86_64 \
+  --description "My test packages" \
+  --instructions "sudo dnf copr enable user/myproject"
+```
+
+Expected output:
+```
+New project was successfully created: https://copr.fedorainfracloud.org/coprs/user/myproject/
+```
+
+### Create Project with Custom Settings
+
+```bash
+# Create project with additional repositories and custom settings
+copr-cli create advanced-project \
+  --chroot fedora-39-x86_64 \
+  --chroot fedora-40-x86_64 \
+  --repo https://example.com/extra-repo \
+  --enable-net on \
+  --isolation nspawn \
+  --multilib on \
+  --description "Project with custom build environment"
+```
+
+### Modify Existing Project
+
+```bash
+# Add more chroots
+copr-cli modify myproject \
+  --chroot fedora-39-x86_64 \
+  --chroot fedora-40-x86_64 \
+  --chroot epel-9-x86_64
+
+# Change description
+copr-cli modify myproject \
+  --description "Updated description"
+
+# Enable networking
+copr-cli modify myproject --enable-net on
+```
+
+### Get Project Information
+
+```bash
+# Get detailed project info
+copr-cli get myproject
+
+# Get another user's project
+copr-cli get username/project
+```
+
+### Fork a Project
+
+```bash
+# Fork someone's project to your namespace
+copr-cli fork username/original-project my-forked-project
+
+# Update existing fork
+copr-cli fork username/original-project my-forked-project --confirm
+```
+
+## Building Packages
+
+### Build from Local SRPM
+
+```bash
+# Build a local SRPM file
+copr-cli build myproject package-1.0-1.fc39.src.rpm
+
+# Build and don't wait for completion
+copr-cli build myproject package.src.rpm --nowait
+
+# Build in background (lower priority)
+copr-cli build myproject package.src.rpm --background
+```
+
+Expected output:
+```
+Build was added to myproject:
+  https://copr.fedorainfracloud.org/coprs/build/12345/
+Created builds: 12345
+Watching build(s): (this may be safely interrupted)
+  14:30:15 Build 12345: [green]importing[/green]
+  14:30:45 Build 12345: [yellow]pending[/yellow]
+  14:31:00 Build 12345: [blue]running[/blue]
+  14:35:23 Build 12345: [green]succeeded[/green]
+```
+
+### Build from URL
+
+```bash
+# Build from a public URL
+copr-cli build myproject \
+  https://example.com/packages/mypackage-1.0-1.fc39.src.rpm
+
+# Build multiple packages from URLs
+copr-cli build myproject \
+  https://example.com/package1.src.rpm \
+  https://example.com/package2.src.rpm \
+  https://example.com/package3.src.rpm
+```
+
+### Build for Specific Chroots
+
+```bash
+# Build only for Fedora 39
+copr-cli build myproject package.src.rpm \
+  -r fedora-39-x86_64
+
+# Build for multiple specific chroots
+copr-cli build myproject package.src.rpm \
+  -r fedora-39-x86_64 \
+  -r fedora-40-x86_64 \
+  -r epel-9-x86_64
+
+# Build for all except specific chroots
+copr-cli build myproject package.src.rpm \
+  --exclude-chroot fedora-rawhide-x86_64
+```
+
+### Build with Custom Options
+
+```bash
+# Build with networking enabled
+copr-cli build myproject package.src.rpm --enable-net on
+
+# Build with custom timeout (2 hours)
+copr-cli build myproject package.src.rpm --timeout 7200
+
+# Build with custom isolation
+copr-cli build myproject package.src.rpm --isolation nspawn
+
+# Build with bootstrap enabled
+copr-cli build myproject package.src.rpm --bootstrap on
+```
+
+### Build in Side Repository
+
+```bash
+# Build in testing side repository
+copr-cli build myproject:testing package.src.rpm
+
+# Build in PR-specific repository
+copr-cli build myproject:pr:123 package.src.rpm
+
+# Build in development branch
+copr-cli build myproject:devel package.src.rpm
+```
+
+### Build Dependencies
+
+```bash
+# Build after another build completes
+copr-cli build myproject package2.src.rpm --after-build-id 12345
+
+# Build in same batch as another build
+copr-cli build myproject package2.src.rpm --with-build-id 12345
+```
+
+## Building from Source Control
+
+### Build from Git Repository
+
+```bash
+# Build from main branch
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo
+
+# Build from specific branch
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo \
+  --commit develop
+
+# Build from specific tag
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo \
+  --commit v1.0.0
+
+# Build from commit hash
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo \
+  --commit abc123def456
+```
+
+### Build with Subdirectory and Spec
+
+```bash
+# Build from repository with custom paths
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo \
+  --subdir packaging \
+  --spec mypackage.spec \
+  --commit main
+```
+
+### Build with Different Methods
+
+```bash
+# Build using tito
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo \
+  --method tito
+
+# Build using tito test (uses --test flag)
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo \
+  --method tito_test
+
+# Build using make_srpm
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo \
+  --method make_srpm
+
+# Build using rpkg (default)
+copr-cli buildscm myproject \
+  --clone-url https://github.com/user/repo \
+  --method rpkg
+```
+
+### Build from SVN
+
+```bash
+# Build from SVN repository
+copr-cli buildscm myproject \
+  --clone-url https://svn.example.com/repo \
+  --type svn
+```
+
+## Building from Other Sources
+
+### Build Python Package from PyPI
+
+```bash
+# Build latest version
+copr-cli buildpypi myproject --packagename requests
+
+# Build specific version
+copr-cli buildpypi myproject \
+  --packagename flask \
+  --packageversion 2.3.0
+
+# Build for specific Python versions
+copr-cli buildpypi myproject \
+  --packagename django \
+  --pythonversions 3
+
+# Use custom spec generator
+copr-cli buildpypi myproject \
+  --packagename numpy \
+  --spec-generator pyp2spec
+```
+
+### Build Ruby Gem
+
+```bash
+# Build gem from rubygems.org
+copr-cli buildgem myproject --gem rails
+copr-cli buildgem myproject --gem sinatra
+```
+
+### Build from DistGit
+
+```bash
+# Build from Fedora dist-git
+copr-cli build-distgit myproject \
+  --name copr-cli \
+  --distgit fedora
+
+# Build from specific branch
+copr-cli build-distgit myproject \
+  --name httpd \
+  --distgit fedora \
+  --commit f39
+
+# Build with namespace
+copr-cli build-distgit myproject \
+  --name copr-cli \
+  --distgit fedora \
+  --namespace @copr/copr
+```
+
+### Build with Custom Script
+
+```bash
+# Create build script
+cat > build.sh << 'EOF'
+#!/bin/bash
+set -e
+# Your custom build logic here
+make srpm
+EOF
+chmod +x build.sh
+
+# Build using custom script
+copr-cli buildcustom myproject \
+  --script build.sh \
+  --script-chroot fedora-39-x86_64 \
+  --script-builddeps "gcc make rpm-build" \
+  --script-resultdir .
+```
+
+## Managing Builds
+
+### Check Build Status
+
+```bash
+# Get build status
+copr-cli status 12345
+```
+
+Possible outputs:
+```
+succeeded
+failed
+running
+pending
+canceled
+skipped
+```
+
+### Watch Build Progress
+
+```bash
+# Watch single build
+copr-cli watch-build 12345
+
+# Watch multiple builds
+copr-cli watch-build 12345 12346 12347
+```
+
+Output:
+```
+Watching build(s): (this may be safely interrupted)
+  14:30:15 Build 12345: importing
+  14:30:20 Build 12346: importing
+  14:30:45 Build 12345: pending
+  14:30:50 Build 12346: pending
+  14:31:00 Build 12345: running
+  14:31:05 Build 12346: running
+  14:35:23 Build 12345: succeeded
+  14:36:10 Build 12346: succeeded
+```
+
+### Cancel Build
+
+```bash
+# Cancel a running or pending build
+copr-cli cancel 12345
+```
+
+### Delete Build
+
+```bash
+# Delete single build
+copr-cli delete-build 12345
+
+# Delete multiple builds (more efficient)
+copr-cli delete-build 12345 12346 12347
+```
+
+### List Project Builds
+
+```bash
+# List all builds in project
+copr-cli list-builds myproject
+
+# List in JSON format
+copr-cli list-builds myproject --output-format json
+```
+
+### Download Build Results
+
+```bash
+# Download all build artifacts
+copr-cli download-build 12345
+
+# Download to specific directory
+copr-cli download-build 12345 -d ~/builds/mypackage
+
+# Download only RPMs
+copr-cli download-build 12345 --rpms
+
+# Download only logs
+copr-cli download-build 12345 --logs
+
+# Download only spec file
+copr-cli download-build 12345 --spec
+
+# Download fedora-review results
+copr-cli download-build 12345 --review
+
+# Download specific chroot only
+copr-cli download-build 12345 \
+  -r fedora-39-x86_64 \
+  --rpms
+```
+
+## Package Management
+
+### Add Package from Git
+
+```bash
+# Add package with SCM source
+copr-cli add-package-scm myproject \
+  --name mypackage \
+  --clone-url https://github.com/user/repo \
+  --commit main \
+  --webhook-rebuild on
+```
+
+### Add Package from PyPI
+
+```bash
+# Add PyPI package
+copr-cli add-package-pypi myproject \
+  --name python-requests \
+  --packagename requests \
+  --webhook-rebuild on
+```
+
+### Edit Package
+
+```bash
+# Update package source
+copr-cli edit-package-scm myproject \
+  --name mypackage \
+  --commit develop
+
+# Update PyPI package version
+copr-cli edit-package-pypi myproject \
+  --name python-requests \
+  --packageversion 2.31.0
+```
+
+### Build Package from Definition
+
+```bash
+# Build package using its configured source
+copr-cli build-package myproject --name mypackage
+
+# Build for specific chroots
+copr-cli build-package myproject \
+  --name mypackage \
+  -r fedora-39-x86_64 \
+  -r fedora-40-x86_64
+
+# Build without waiting
+copr-cli build-package myproject \
+  --name mypackage \
+  --nowait
+```
+
+### List Packages
+
+```bash
+# List all packages
+copr-cli list-packages myproject
+
+# List with latest build info
+copr-cli list-packages myproject --with-latest-build
+
+# List package names only
+copr-cli list-package-names myproject
+
+# Get specific package info
+copr-cli get-package myproject --name mypackage
+
+# Get with all builds
+copr-cli get-package myproject \
+  --name mypackage \
+  --with-all-builds \
+  --output-format json
+```
+
+### Delete Package
+
+```bash
+# Delete package and all its builds
+copr-cli delete-package myproject --name oldpackage
+```
+
+### Reset Package
+
+```bash
+# Clear package source configuration
+copr-cli reset-package myproject --name mypackage
+```
+
+## Chroot Configuration
+
+### List Available Chroots
+
+```bash
+# List all available chroots
+copr-cli list-chroots
+```
+
+Output:
+```
+fedora-39-x86_64
+fedora-40-x86_64
+fedora-rawhide-x86_64
+epel-9-x86_64
+epel-8-x86_64
+...
+```
+
+### Edit Chroot Configuration
+
+```bash
+# Add buildroot packages
+copr-cli edit-chroot myproject/fedora-39-x86_64 \
+  --packages "gcc make cmake"
+
+# Add additional repository
+copr-cli edit-chroot myproject/fedora-39-x86_64 \
+  --repos "https://example.com/repo"
+
+# Set rpmbuild options
+copr-cli edit-chroot myproject/fedora-39-x86_64 \
+  --rpmbuild-with test \
+  --rpmbuild-without doc
+
+# Enable modules
+copr-cli edit-chroot myproject/fedora-39-x86_64 \
+  --modules "nodejs:18,!nodejs:16"
+
+# Upload comps.xml
+copr-cli edit-chroot myproject/fedora-39-x86_64 \
+  --upload-comps comps.xml
+
+# Use custom bootstrap image
+copr-cli edit-chroot myproject/fedora-39-x86_64 \
+  --bootstrap-image registry.example.com/fedora:39
+```
+
+### Get Chroot Configuration
+
+```bash
+# Get chroot details
+copr-cli get-chroot myproject/fedora-39-x86_64
+
+# Get in JSON format
+copr-cli get-chroot myproject/fedora-39-x86_64 \
+  --output-format json
+```
+
+### Reset Chroot Configuration
+
+```bash
+# Reset specific fields to defaults
+copr-cli edit-chroot myproject/fedora-39-x86_64 \
+  --reset additional_packages \
+  --reset additional_repos
+```
+
+## Mock Configuration
+
+### Get Mock Config
+
+```bash
+# Get mock configuration file
+copr-cli mock-config myproject fedora-39-x86_64 > mock.cfg
+
+# Use with mock for local testing
+mock -r mock.cfg --shell
+
+# Build locally with same config
+mock -r mock.cfg --rebuild package.src.rpm
+```
+
+## Permissions Management
+
+### Give Someone Build Access
+
+```bash
+# Approve user as builder
+copr-cli edit-permissions myproject --builder john=approved
+
+# Approve user as admin
+copr-cli edit-permissions myproject --admin jane=approved
+
+# Revoke permissions
+copr-cli edit-permissions myproject --builder john=nothing
+```
+
+### List Permissions
+
+```bash
+# List all project permissions
+copr-cli list-permissions myproject
+```
+
+Output:
+```
+john:
+  builder: approved
+  admin: nothing
+jane:
+  builder: approved
+  admin: approved
+```
+
+### Request Permissions
+
+```bash
+# Request builder access to someone's project
+copr-cli request-permissions username/project --builder
+
+# Request admin access
+copr-cli request-permissions username/project --admin
+
+# Cancel permission request
+copr-cli request-permissions username/project --builder nothing
+```
+
+## Monitoring
+
+### Monitor Package States
+
+```bash
+# Monitor all packages in project
+copr-cli monitor myproject
+
+# Monitor with custom fields
+copr-cli monitor myproject \
+  --fields name,chroot,state,build_id
+
+# Monitor in JSON format
+copr-cli monitor myproject --output-format json
+
+# Monitor side repository
+copr-cli monitor myproject --dirname myproject:testing
+```
+
+Output:
+```
+name       chroot              build_id  state      pkg_version
+mypackage  fedora-39-x86_64   12345     succeeded  1.0-1
+mypackage  fedora-40-x86_64   12346     succeeded  1.0-1
+otherpack  fedora-39-x86_64   12347     running    2.3-1
+```
+
+## Advanced Workflows
+
+### Automated Build Pipeline
+
+```bash
+#!/bin/bash
+# Build script for CI/CD
+
+PROJECT="myproject"
+PACKAGE="myapp"
+
+# Build from git
+BUILD_ID=$(copr-cli buildscm "$PROJECT" \
+  --clone-url https://github.com/user/repo \
+  --commit "$GIT_COMMIT" \
+  --nowait | grep "Created builds:" | awk '{print $3}')
+
+echo "Build ID: $BUILD_ID"
+
+# Wait and check status
+while true; do
+  STATUS=$(copr-cli status "$BUILD_ID")
+  echo "Status: $STATUS"
+  
+  if [[ "$STATUS" == "succeeded" ]]; then
+    echo "Build successful!"
+    exit 0
+  elif [[ "$STATUS" == "failed" ]] || [[ "$STATUS" == "canceled" ]]; then
+    echo "Build failed!"
+    exit 1
+  fi
+  
+  sleep 30
+done
+```
+
+### Build Matrix
+
+```bash
+#!/bin/bash
+# Build for multiple projects/chroots
+
+PACKAGE="package.src.rpm"
+
+# Build for Fedora
+copr-cli build fedora-project "$PACKAGE" \
+  -r fedora-39-x86_64 \
+  -r fedora-40-x86_64 \
+  --nowait
+
+# Build for EPEL
+copr-cli build epel-project "$PACKAGE" \
+  -r epel-8-x86_64 \
+  -r epel-9-x86_64 \
+  --nowait
+
+# Build for testing repo
+copr-cli build fedora-project:testing "$PACKAGE" --nowait
+```
+
+### Batch Package Operations
+
+```bash
+#!/bin/bash
+# Add multiple packages from a list
+
+PROJECT="myproject"
+
+while IFS=',' read -r name repo; do
+  echo "Adding package: $name"
+  copr-cli add-package-scm "$PROJECT" \
+    --name "$name" \
+    --clone-url "$repo" \
+    --webhook-rebuild on
+done < packages.csv
+```
+
+### Download All Project Builds
+
+```bash
+#!/bin/bash
+# Download all builds from a project
+
+PROJECT="myproject"
+OUTPUT_DIR="./builds"
+
+mkdir -p "$OUTPUT_DIR"
+
+# Get all build IDs
+BUILD_IDS=$(copr-cli list-builds "$PROJECT" --output-format json | \
+  jq -r '.[].id')
+
+# Download each build
+for build_id in $BUILD_IDS; do
+  echo "Downloading build $build_id..."
+  copr-cli download-build "$build_id" \
+    -d "$OUTPUT_DIR/$build_id" \
+    --rpms
+done
+```
+
+## Troubleshooting
+
+### Debug Failed Build
+
+```bash
+# Get build status
+copr-cli status 12345
+
+# Download build logs
+copr-cli download-build 12345 --logs
+
+# Get mock config to reproduce locally
+copr-cli mock-config myproject fedora-39-x86_64 > mock.cfg
+mock -r mock.cfg --shell
+```
+
+### Test Configuration
+
+```bash
+# Enable debug output
+copr-cli --debug build myproject package.src.rpm
+
+# Test authentication
+copr-cli whoami
+
+# Test project access
+copr-cli get myproject
+```
+
+### Common Issues
+
+**Build times out:**
+```bash
+# Increase timeout to 3 hours
+copr-cli build myproject package.src.rpm --timeout 10800
+```
+
+**Need networking in build:**
+```bash
+# Enable networking for single build
+copr-cli build myproject package.src.rpm --enable-net on
+
+# Or enable for entire project
+copr-cli modify myproject --enable-net on
+```
+
+**Build fails on one chroot:**
+```bash
+# Exclude problematic chroot
+copr-cli build myproject package.src.rpm \
+  --exclude-chroot fedora-rawhide-x86_64
+```
+
+**Need specific build dependencies:**
+```bash
+# Add packages to chroot buildroot
+copr-cli edit-chroot myproject/fedora-39-x86_64 \
+  --packages "special-devel another-package"
+```
+
+## Next Steps
+
+- [Commands Reference](/cli/commands) - Detailed command documentation
+- [Configuration](/cli/configuration) - Advanced configuration options

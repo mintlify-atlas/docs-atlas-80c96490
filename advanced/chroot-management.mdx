@@ -1,0 +1,445 @@
+---
+title: Chroot Management
+description: Managing build targets, enabling new chroots, and handling EOL releases
+---
+
+Chroots represent build targets in Copr - specific combinations of distribution, version, and architecture (e.g., `fedora-39-x86_64`). This guide covers chroot lifecycle management for Copr administrators.
+
+## Commands Overview
+
+Copr provides several frontend commands for chroot management:
+
+```bash
+copr-frontend create-chroot <name>
+copr-frontend alter-chroot --action activate <name>
+copr-frontend alter-chroot --action deactivate <name>
+copr-frontend branch-fedora <new-branched-version>
+copr-frontend rawhide-to-release <rawhide-chroot> <newly-created-chroot>
+copr-frontend chroots-template [--template PATH]
+copr-frontend eol-lifeless-rolling-chroots
+```
+
+<Note>
+All commands must be run as the `copr-fe` user on the Copr Frontend server.
+</Note>
+
+## Fedora Branching Process
+
+When a new Fedora version branches from Rawhide, Copr needs to create corresponding chroots and migrate builds.
+
+### Why Branch Before Official Release?
+
+<Warning>
+Run the branching process **before** Fedora officially branches. This ensures packages in the new chroots have the old dist tag (e.g., `.fc39`, not `.fc40`) which matches the packages built from Rawhide.
+</Warning>
+
+### Branching Workflow
+
+<Steps>
+  <Step title="Run branch-fedora Command">
+    Before Fedora branches to version 31:
+    
+    ```bash
+    copr-frontend branch-fedora 31
+    ```
+    
+    <Warning>
+    This command takes **tens of minutes** to complete. Backend processing takes about **a day**.
+    </Warning>
+    
+    This command:
+    - Creates new `fedora-31-*` chroots from `fedora-rawhide-*` chroots
+    - Copies/forks latest successful Rawhide builds to new chroots
+    - Creates chroots in **deactivated** state
+  </Step>
+
+  <Step title="Wait for Actions to Process">
+    Monitor the [FE statistics page](https://copr.fedorainfracloud.org/status/stats/) for the Actions peak to be processed.
+    
+    During this time:
+    - Don't activate the new chroots yet
+    - New Rawhide builds won't be copied (known limitation)
+  </Step>
+
+  <Step title="Verify Mock Configs">
+    Check that mock configs are available:
+    
+    1. Visit [mock-core-configs repository](https://github.com/rpm-software-management/mock/tree/devel/mock-core-configs/etc/mock)
+    2. Verify configs for the new Fedora version exist
+    3. Ensure `mock-core-configs` package is updated on builders
+  </Step>
+
+  <Step title="Activate New Chroots">
+    Activate the chroots **as soon as possible** after processing:
+    
+    ```bash
+    copr-frontend alter-chroot --action activate \
+        fedora-31-x86_64 \
+        fedora-31-i386 \
+        fedora-31-ppc64le \
+        fedora-31-aarch64 \
+        fedora-31-armhfp \
+        fedora-31-s390x
+    ```
+    
+    <Note>
+    The sooner you activate, the fewer Rawhide builds will be missing from the branched chroot.
+    </Note>
+  </Step>
+
+  <Step title="Announce to Mailing List">
+    Send announcement email to `copr-devel@lists.fedorahosted.org`:
+    
+    ```
+    Subject: New Fedora 31 chroots available in Copr
+    
+    The Fedora 31 chroots are now active in Copr:
+    - fedora-31-x86_64
+    - fedora-31-i386
+    - fedora-31-ppc64le
+    - fedora-31-aarch64
+    - fedora-31-armhfp
+    - fedora-31-s390x
+    
+    Projects with follow_fedora_branching enabled have been
+    automatically populated with builds from Rawhide.
+    ```
+  </Step>
+</Steps>
+
+### Manual Branching (Per Architecture)
+
+For individual architectures:
+
+```bash
+# Create deactivated chroot
+copr-frontend create-chroot fedora-31-x86_64 --deactivated
+
+# Copy builds from Rawhide
+copr-frontend rawhide-to-release \
+    fedora-rawhide-x86_64 \
+    fedora-31-x86_64
+
+# Activate when ready
+copr-frontend alter-chroot --action activate fedora-31-x86_64
+```
+
+## Follow Fedora Branching
+
+Projects can opt into automatic chroot creation:
+
+```python
+copr.follow_fedora_branching = True  # Default
+```
+
+When enabled:
+- New Fedora chroots are automatically enabled for the project
+- Rawhide builds are forked to the new chroot
+- Happens during the `branch-fedora` command execution
+
+<Expandable title="Disable Auto-Branching">
+
+To disable for a specific project:
+
+```bash
+copr-cli modify --no-follow-fedora-branching myproject
+```
+
+Or via Python:
+
+```python
+copr.follow_fedora_branching = False
+db.session.commit()
+```
+
+</Expandable>
+
+## EOL Deactivation Process
+
+When a Fedora version reaches End of Life, disable its chroots:
+
+<Steps>
+  <Step title="Check Dependencies">
+    <Warning>
+    Before deactivating, verify no services depend on the chroots:
+    - [Fedora Review Service](https://github.com/FrostyX/fedora-review-service/blob/main/conf/fedora-review-service-prod.yaml)
+    - CI/CD pipelines
+    - Automated testing systems
+    </Warning>
+  </Step>
+
+  <Step title="Mark Chroots as EOL">
+    Wait a few weeks after official EOL, then:
+    
+    ```bash
+    fv=34
+    copr-frontend alter-chroot --action eol \
+        fedora-$fv-x86_64 \
+        fedora-$fv-i386 \
+        fedora-$fv-ppc64le \
+        fedora-$fv-aarch64 \
+        fedora-$fv-armhfp \
+        fedora-$fv-s390x
+    ```
+    
+    <Note>
+    No data is removed. Repositories are preserved. Users simply cannot submit new builds.
+    </Note>
+  </Step>
+
+  <Step title="Send Announcement">
+    Email `copr-devel@lists.fedorahosted.org` with EOL notice.
+    
+    Use the [disable chroots template](#disable-chroots-template).
+  </Step>
+</Steps>
+
+### Disable Chroots Template
+
+<Accordion title="Email Template">
+
+```
+Subject: Fedora 34 chroots disabled in Copr
+
+The Fedora 34 chroots have been marked as End of Life and
+are no longer accepting new builds:
+
+- fedora-34-x86_64
+- fedora-34-i386
+- fedora-34-ppc64le
+- fedora-34-aarch64
+- fedora-34-armhfp
+- fedora-34-s390x
+
+Existing repositories and builds remain available.
+
+If you need to continue building for Fedora 34, please
+contact copr-devel@lists.fedorahosted.org.
+```
+
+</Accordion>
+
+## Rolling Chroot EOL
+
+For rolling release chroots (Rawhide, CentOS Stream, etc.):
+
+```bash
+copr-frontend eol-lifeless-rolling-chroots
+```
+
+<Note>
+Consider running this daily in the `copr-frontend-optional` cron job.
+</Note>
+
+This command:
+1. Identifies rolling chroots with no recent builds
+2. Marks them for removal/deactivation
+3. Applies the same notification policy as standard EOL
+
+**Why?** Old rolling chroot packages become non-installable as the distro moves forward with dependencies.
+
+### Keeping Rolling Chroots Alive
+
+Users can prevent EOL by:
+- Triggering a new build in the chroot
+- Manually prolonging the chroot lifetime (if supported)
+
+## Chroot Comments
+
+Add informational messages to specific chroots:
+
+### Single Chroot
+
+```bash
+copr-frontend comment-chroot \
+    --chroot epel-8-x86_64 \
+    --comment '<strong>Built against RHEL 8!</strong>'
+```
+
+<Note>
+HTML formatting is supported in chroot comments.
+</Note>
+
+### Bulk Comments with Template
+
+For managing comments across many chroots:
+
+```bash
+copr-frontend chroots-template --template /etc/copr/chroots.conf
+```
+
+Template format (Python dictionary):
+
+```python
+config = {}
+config["emulated"] = "This is an emulated chroot"
+config["rules"] = [
+    {
+        "match": "fedora-rawhide-i386",
+        "comment": "This is soon to be removed",
+    },
+    {
+        "match": ["fedora-32", "fedora-33"],
+        "comment": "<strong>Currently EOL</strong>, use at your own risk",
+    },
+    {
+        "match": ["aarch64", "ppc64le"],
+        "match_type": "arch",
+        "comment_append": "{{ emulated }}",
+    },
+]
+```
+
+<Expandable title="Template Matching Rules">
+
+**Match Types:**
+- `match`: String or list of strings to match against
+- `match_type`: What to match - `"name"` (default) or `"arch"`
+
+**Actions:**
+- `comment`: Replace entire comment
+- `comment_append`: Append to existing comment
+
+**Variables:**
+Use `{{ variable_name }}` to reference variables defined in `config`.
+
+</Expandable>
+
+## Chroot Lifecycle States
+
+<AccordionGroup>
+  <Accordion title="Active">
+    Chroot is available for new builds.
+    
+    ```python
+    copr_chroot.delete_status == ChrootDeletionStatus("active")
+    ```
+  </Accordion>
+
+  <Accordion title="Preserved">
+    Chroot is EOL but not deleted. Cannot submit new builds.
+    
+    ```python
+    copr_chroot.delete_status == ChrootDeletionStatus("preserved")
+    ```
+  </Accordion>
+
+  <Accordion title="Deleted">
+    Chroot is completely removed.
+    
+    ```python
+    copr_chroot.deleted == True
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Project Chroot Access
+
+Projects can query available chroots:
+
+```python
+# Active chroots only
+active = copr.active_chroots
+
+# Active and preserved (not deleted)
+permissible = copr.enable_permissible_chroots
+
+# Check if specific chroot is available
+if my_chroot in copr.active_chroots:
+    # Can build
+```
+
+### Outdated Chroots
+
+Chroots scheduled for deletion:
+
+```python
+outdated = copr.outdated_chroots
+# Returns chroots with delete_after date set
+
+for chroot in outdated:
+    print(f"{chroot.name} will be deleted after {chroot.delete_after}")
+```
+
+## Multilib Chroots
+
+For 32-bit multilib support on 64-bit architectures:
+
+```python
+multilib_chroots = copr.active_multilib_chroots
+# Returns x86_64 chroots that have i686 counterparts active
+```
+
+<Note>
+Multilib requires both 64-bit and 32-bit chroots to be active.
+</Note>
+
+## Chroot Modifications
+
+Track per-chroot configuration changes:
+
+```python
+modified = copr.modified_chroots
+# Returns dict of chroots with custom settings:
+# {
+#   'fedora-39-x86_64': {
+#     'Additional buildroot packages': 'gcc, make',
+#     'Build time repositories': 'https://example.com/repo',
+#     'Mock options': '--with tests --without docs',
+#     'Module setup commands': 'module enable nodejs:20',
+#     'Bootstrap overridden as': 'on',
+#     'Isolation set to': 'nspawn'
+#   }
+# }
+```
+
+## Best Practices
+
+1. **Branch Early**: Run `branch-fedora` before official Fedora branching
+2. **Monitor Actions**: Watch the FE statistics page during branching
+3. **Activate Quickly**: Minimize time between branching and activation
+4. **Wait Before EOL**: Give users a few weeks after official EOL
+5. **Announce Changes**: Always email the mailing list
+6. **Check Dependencies**: Verify no services depend on chroots before EOL
+7. **Test Mock Configs**: Ensure mock-core-configs is updated before activation
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Builds Missing from Branched Chroot">
+    **Problem:** Some Rawhide builds aren't in the new chroot.
+    
+    **Cause:** New builds submitted to Rawhide after `branch-fedora` but before activation aren't copied.
+    
+    **Solution:** Activate new chroots quickly. Users can rebuild missing packages.
+  </Accordion>
+
+  <Accordion title="Mock Config Not Found">
+    **Problem:** Builds fail with "mock config not found."
+    
+    **Cause:** `mock-core-configs` not updated on builders.
+    
+    **Solution:** Update mock packages on all builder machines.
+  </Accordion>
+
+  <Accordion title="Action Queue Backlog">
+    **Problem:** Actions take too long to process.
+    
+    **Cause:** Many projects with `follow_fedora_branching` enabled.
+    
+    **Solution:** Normal. Be patient, it processes eventually (~1 day).
+  </Accordion>
+</AccordionGroup>
+
+## Mailing List Notifications
+
+After chroot changes, send email to:
+- **Address:** `copr-devel@lists.fedorahosted.org`
+- **When:** After enabling new chroots OR disabling EOL chroots
+- **Combined:** Can describe both actions in one email if done together
+
+## Further Information
+
+- [Mock Configuration Repository](https://github.com/rpm-software-management/mock/tree/devel/mock-core-configs/etc/mock)
+- [Copr Statistics Page](https://copr.fedorainfracloud.org/status/stats/)
+- [Fedora Branching Schedule](https://fedoraproject.org/wiki/Releases)

@@ -1,0 +1,345 @@
+---
+title: Module Builds
+description: Build and manage RPM modules with modulemd specifications
+---
+
+Copr supports building RPM modules using modulemd format. Modules are collections of packages with defined streams, profiles, and dependencies.
+
+## Overview
+
+Modules in Copr allow you to:
+- Build collections of related packages as a unit
+- Define multiple streams of the same module
+- Create installation profiles for different use cases
+- Specify module-level dependencies
+
+## Module Model
+
+Modules are represented in the database with these key attributes:
+
+```python
+class Module:
+    id: Integer           # Unique identifier
+    name: String          # Module name (e.g., 'nodejs')
+    stream: String        # Stream version (e.g., '18', '20')
+    version: BigInteger   # Module version/build number
+    summary: String       # Short description
+    description: Text     # Detailed description
+    yaml_b64: Text       # Base64-encoded modulemd YAML
+```
+
+<Note>
+The `yaml_b64` field stores the original modulemd YAML. This preserves the exact file structure and any custom fields not directly mapped to model attributes.
+</Note>
+
+## Module Status
+
+Modules can be in one of these states:
+
+| Status | Description |
+|--------|-------------|
+| `waiting` | Module build is queued |
+| `pending` | Module build is pending |
+| `starting` | Module build is starting |
+| `running` | Module build is in progress |
+| `succeeded` | Module built successfully |
+| `failed` | Module build failed |
+| `canceled` | Module build was canceled |
+| `unknown` | Status cannot be determined |
+
+The module status is derived from:
+1. Associated backend action result (if exists)
+2. Individual build statuses within the module
+
+## Creating Modules
+
+### Using the Web Interface
+
+1. Navigate to your project
+2. Go to the "Modules" tab
+3. Click "Build Module"
+4. Provide modulemd YAML content
+
+### Using the API
+
+<CodeGroup>
+
+```python Python Client
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+modulemd = """
+data:
+  name: my-module
+  stream: "1.0"
+  version: 1
+  summary: My example module
+  description: A module for demonstration
+  license:
+    module: [MIT]
+  components:
+    rpms:
+      my-package:
+        rationale: Main package
+        ref: main
+"""
+
+result = client.module_proxy.build_from_file(
+    ownername="@mygroup",
+    projectname="myproject",
+    path="/path/to/modulemd.yaml"
+)
+```
+
+```bash CLI
+copr build-module myproject \
+    --yaml modulemd.yaml
+```
+
+</CodeGroup>
+
+## Modulemd Structure
+
+<Accordion title="Example Modulemd YAML">
+
+```yaml
+document: modulemd
+version: 2
+data:
+  name: nodejs
+  stream: "20"
+  version: 1
+  summary: JavaScript runtime
+  description: >
+    Node.js is a JavaScript runtime built on Chrome's V8
+    JavaScript engine.
+  license:
+    module:
+      - MIT
+  dependencies:
+    - buildrequires:
+        platform: [el8]
+      requires:
+        platform: [el8]
+  profiles:
+    default:
+      rpms:
+        - nodejs
+        - npm
+    development:
+      rpms:
+        - nodejs
+        - npm
+        - nodejs-devel
+  api:
+    rpms:
+      - nodejs
+      - npm
+  filter:
+    rpms:
+      - nodejs-private-libs
+  components:
+    rpms:
+      nodejs:
+        rationale: Primary runtime
+        ref: v20.0.0
+        buildorder: 1
+```
+
+</Accordion>
+
+## Module Properties
+
+### Name-Stream-Version (NSV)
+
+Modules are uniquely identified by their NSV:
+
+```python
+module.nsv  # Returns "nodejs-20-1"
+module.full_name  # Returns "@group/project/nodejs-20-1"
+```
+
+### RPM Filters and APIs
+
+Control which packages are visible:
+
+```python
+module.rpm_filter  # Packages excluded from installation
+module.rpm_api     # Packages part of the module API
+```
+
+### Profiles
+
+Define installation profiles for different use cases:
+
+```python
+module.profiles
+# Returns: {
+#   'default': ['nodejs', 'npm'],
+#   'development': ['nodejs', 'npm', 'nodejs-devel']
+# }
+```
+
+### Components
+
+Access module component information:
+
+```python
+module.components
+# Returns dict of RPM components with their metadata
+```
+
+## Module Builds and Relationships
+
+Modules are associated with regular package builds:
+
+```python
+module.builds  # List of Build objects in this module
+module.action  # Backend action for module creation
+```
+
+Builds can be part of a module:
+
+```python
+build.module_id    # Foreign key to module
+build.module       # Related Module object
+```
+
+## Module Hotfixes
+
+Projects can enable module hotfixes, allowing packages to override module content:
+
+```python
+copr.module_hotfixes = True  # Enable module hotfixes
+```
+
+<Warning>
+Enabling `module_hotfixes` affects how DNF resolves dependencies when modules are enabled. Use with caution.
+</Warning>
+
+## Module Chroot Configuration
+
+Configure module-specific settings per chroot:
+
+```python
+copr_chroot.module_toggle  # Module setup commands
+```
+
+Example module toggle commands:
+
+```bash
+# Enable a module stream
+module enable nodejs:20
+
+# Install a module profile
+module install nodejs:20/default
+
+# Disable a module
+module disable nodejs
+```
+
+## Working with Modules
+
+### Query Modules
+
+<CodeGroup>
+
+```python Query by NSV
+from coprs.models import Module
+
+module = Module.query.filter_by(
+    name="nodejs",
+    stream="20",
+    version=1
+).first()
+```
+
+```python Query by Project
+modules = copr.modules
+for module in modules:
+    print(f"{module.nsv}: {module.state}")
+```
+
+</CodeGroup>
+
+### Check Module Status
+
+```python
+if module.status == ModuleStatusEnum("succeeded"):
+    print(f"Module {module.nsv} built successfully")
+else:
+    print(f"Module status: {module.state}")
+```
+
+### Access Module URL
+
+Modules are available at the project's module URL:
+
+```python
+modules_url = copr.modules_url
+# Returns: "https://download.copr.../results/owner/project/modules"
+```
+
+## Module Actions
+
+Module creation triggers backend actions:
+
+```python
+action = module.action
+if action:
+    print(f"Action type: {action.action_type}")
+    print(f"Result: {action.result}")
+    print(f"Message: {action.message}")
+```
+
+Action states:
+- `waiting`: Action queued for backend
+- `success`: Module created successfully
+- `failure`: Module creation failed
+
+## Unique Constraints
+
+<Warning>
+Only one module with a specific name-stream-version combination can exist per project:
+
+```sql
+UNIQUE (copr_id, name, stream, version)
+```
+
+Attempting to create a duplicate will fail.
+</Warning>
+
+## API Serialization
+
+When modules are serialized for API responses:
+
+```python
+action_dict = action.to_dict()
+if action_dict.get("object_type") == "module":
+    # Additional module-specific data is included:
+    # - projectname
+    # - ownername
+    # - modulemd_b64 (base64-encoded YAML)
+```
+
+## Best Practices
+
+1. **Version incrementing**: Increment module version for each rebuild
+2. **Stream stability**: Keep streams consistent - don't change package versions drastically within a stream
+3. **Dependencies**: Clearly specify module dependencies in `buildrequires` and `requires`
+4. **Profiles**: Define meaningful profiles for common use cases
+5. **Testing**: Test module installations with different profiles
+6. **Documentation**: Document module purpose and usage in description
+
+## Limitations
+
+- Modules must have unique name-stream-version per project
+- Module YAML must be valid modulemd format (version 2 recommended)
+- Component packages must exist in the project or dependencies
+- Module builds depend on successful component package builds
+
+## Further Reading
+
+- [Modulemd Specification](https://github.com/fedora-modularity/libmodulemd)
+- [Fedora Modularity Documentation](https://docs.fedoraproject.org/en-US/modularity/)

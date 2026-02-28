@@ -1,0 +1,213 @@
+---
+title: Build Chroot Endpoints
+description: Get status and configuration for individual build chroots
+---
+
+## Get Build Chroot
+
+<CodeGroup>
+```bash GET /api_3/build-chroot/
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/build-chroot/?build_id=12345&chrootname=fedora-40-x86_64"
+```
+</CodeGroup>
+
+Get information about a specific build chroot by build ID and mock chroot name.
+
+### Query Parameters
+
+<ParamField query="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+<ParamField query="chrootname" type="string" required>
+  Mock chroot name (e.g., "fedora-40-x86_64")
+</ParamField>
+
+### Response
+
+<ResponseField name="name" type="string">
+  Chroot name
+</ResponseField>
+
+<ResponseField name="started_on" type="integer">
+  Unix timestamp when chroot build started
+</ResponseField>
+
+<ResponseField name="ended_on" type="integer">
+  Unix timestamp when chroot build ended
+</ResponseField>
+
+<ResponseField name="result_url" type="string">
+  URL to build results directory
+</ResponseField>
+
+<ResponseField name="state" type="string">
+  Build state for this chroot: "importing", "pending", "starting", "running", "succeeded", "failed", "canceled", "skipped"
+</ResponseField>
+
+---
+
+## List Build Chroots
+
+<CodeGroup>
+```bash GET /api_3/build-chroot/list
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/build-chroot/list?build_id=12345"
+```
+</CodeGroup>
+
+List all build chroots for a specific build with pagination.
+
+### Query Parameters
+
+<ParamField query="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Number of items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+<ParamField query="order_type" type="string" default="ASC">
+  Order direction (ASC or DESC)
+</ParamField>
+
+### Response
+
+<ResponseField name="items" type="array">
+  Array of build chroot objects (same structure as Get Build Chroot)
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Pagination metadata
+  <Expandable title="properties">
+    <ResponseField name="limit" type="integer">
+      Items per page
+    </ResponseField>
+    <ResponseField name="offset" type="integer">
+      Number of items skipped
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Get Build Chroot Config
+
+<CodeGroup>
+```bash GET /api_3/build-chroot/build-config
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/build-chroot/build-config?build_id=12345&chrootname=fedora-40-x86_64"
+```
+</CodeGroup>
+
+Get build configuration used for a specific build chroot.
+
+### Query Parameters
+
+<ParamField query="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+<ParamField query="chrootname" type="string" required>
+  Mock chroot name
+</ParamField>
+
+### Response
+
+<ResponseField name="repos" type="array">
+  List of base repository URLs used for this build
+</ResponseField>
+
+<ResponseField name="additional_repos" type="array">
+  Additional repository URLs configured for the project
+</ResponseField>
+
+<ResponseField name="additional_packages" type="array">
+  Additional packages installed in buildroot
+</ResponseField>
+
+<ResponseField name="with_opts" type="array">
+  RPM --with options
+</ResponseField>
+
+<ResponseField name="without_opts" type="array">
+  RPM --without options
+</ResponseField>
+
+<ResponseField name="memory_limit" type="integer">
+  Memory limit in MB
+</ResponseField>
+
+<ResponseField name="timeout" type="integer">
+  Build timeout in seconds
+</ResponseField>
+
+<ResponseField name="enable_net" type="boolean">
+  Whether network access is enabled
+</ResponseField>
+
+<ResponseField name="is_background" type="boolean">
+  Whether this is a background build
+</ResponseField>
+
+<ResponseField name="bootstrap" type="string">
+  Bootstrap container mode
+</ResponseField>
+
+<ResponseField name="bootstrap_image" type="string">
+  Bootstrap container image URL
+</ResponseField>
+
+---
+
+## Get Built Packages
+
+<CodeGroup>
+```bash GET /api_3/build-chroot/built-packages
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/build-chroot/built-packages?build_id=12345&chrootname=fedora-40-x86_64"
+```
+</CodeGroup>
+
+Get built packages (NEVRA dicts) for a given build chroot.
+
+### Query Parameters
+
+<ParamField query="build_id" type="integer" required>
+  Build ID
+</ParamField>
+
+<ParamField query="chrootname" type="string" required>
+  Mock chroot name
+</ParamField>
+
+### Response
+
+Returns a dictionary containing package information with NEVRA (Name-Epoch-Version-Release-Architecture) details.
+
+<ResponseField name="packages" type="array">
+  Array of package objects with NEVRA information
+  <Expandable title="properties">
+    <ResponseField name="name" type="string">
+      Package name
+    </ResponseField>
+    <ResponseField name="epoch" type="string">
+      Package epoch
+    </ResponseField>
+    <ResponseField name="version" type="string">
+      Package version
+    </ResponseField>
+    <ResponseField name="release" type="string">
+      Package release
+    </ResponseField>
+    <ResponseField name="arch" type="string">
+      Package architecture
+    </ResponseField>
+  </Expandable>
+</ResponseField>

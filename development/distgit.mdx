@@ -1,0 +1,492 @@
+---
+title: DistGit Component
+description: Git repository management service for importing source packages into Copr
+---
+
+## Overview
+
+The **copr-dist-git** component manages source package import and storage in Git repositories. It:
+
+- Imports source packages from various sources (URLs, PyPI, RubyGems, Git repos)
+- Stores source tarballs in lookaside cache
+- Maintains Git repositories for each package
+- Generates CGit repository listings
+- Provides source package data to builders
+
+<Accordion title="Key Technologies">
+- **Language**: Python 3
+- **Version Control**: Git with rpkg
+- **Web Interface**: CGit
+- **HTTP Server**: httpd (Apache)
+- **Task Queue**: Redis
+- **Parallelization**: multiprocessing
+</Accordion>
+
+## Architecture
+
+```
+┌──────────────┐
+│  Frontend    │ creates import tasks
+└──────┬───────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│        Copr Dist-Git                 │
+│                                      │
+│  ┌───────────────────────────────┐  │
+│  │   Import Dispatcher           │  │
+│  │   (systemd service)           │  │
+│  └──────────┬────────────────────┘  │
+│             │ spawns workers         │
+│             ▼                        │
+│  ┌───────────────────────────────┐  │
+│  │   Import Workers (pool)       │  │
+│  │   - Download sources          │  │
+│  │   - Extract spec file         │  │
+│  │   - Create git repo           │  │
+│  │   - Upload to lookaside       │  │
+│  └───────────────────────────────┘  │
+└──────┬────────────────────────┬─────┘
+       │                        │
+       ▼                        ▼
+┌──────────────┐        ┌───────────────┐
+│ Git Repos    │        │ Lookaside     │
+│ /var/lib/    │        │ Cache         │
+│ dist-git/git │        │ (tarballs)    │
+└──────────────┘        └───────────────┘
+```
+
+## Directory Structure
+
+```
+dist-git/
+├── copr_dist_git/          # Main Python package
+│   ├── __init__.py
+│   ├── import_dispatcher.py   # Task dispatcher
+│   ├── import_task.py         # Task representation
+│   ├── importer.py            # Import worker
+│   ├── package_import.py      # Import logic
+│   ├── helpers.py             # Utility functions
+│   └── exceptions.py          # Custom exceptions
+├── run/                       # Executable scripts
+│   ├── copr-dist-git-import-dispatcher
+│   └── copr-distgit-remove-unused-sources
+├── conf/                      # Configuration
+│   ├── copr-dist-git.conf.example
+│   ├── httpd/                # Apache config
+│   └── cron.monthly/         # Cleanup scripts
+└── copr-dist-git.service     # Systemd service
+```
+
+## Storage Layout
+
+<Accordion title="File System Structure">
+```
+/var/lib/copr-dist-git/
+├── git/                     # Git repositories
+│   ├── @copr/
+│   │   └── copr-dev/
+│   │       ├── copr-backend.git/
+│   │       │   ├── HEAD
+│   │       │   ├── config
+│   │       │   ├── refs/
+│   │       │   └── objects/
+│   │       └── copr-frontend.git/
+│   └── user/
+│       └── project/
+│           └── package.git/
+├── lookaside/              # Source tarballs
+│   └── pkgs/
+│       ├── @copr/
+│       │   └── copr-dev/
+│       │       ├── copr-backend/
+│       │       │   ├── copr-backend-1.0.tar.gz
+│       │       │   └── copr-backend-1.1.tar.gz
+│       │       └── copr-frontend/
+│       └── user/
+└── per-task-logs/          # Import task logs
+    ├── task-12345.log
+    └── task-12346.log
+```
+</Accordion>
+
+## Core Components
+
+<Accordion title="Import Dispatcher">
+### Import Dispatcher (`import_dispatcher.py`)
+
+Manages the worker pool for import tasks:
+
+```python
+class ImportDispatcher:
+    def __init__(self):
+        self.worker_manager = WorkerManager(
+            redis_client=redis_client,
+            max_workers=10,
+        )
+    
+    def run(self):
+        while True:
+            # Fetch import tasks from frontend
+            tasks = self.frontend.get_import_tasks()
+            
+            # Spawn workers for tasks
+            for task in tasks:
+                if self.can_start_worker(task):
+                    self.spawn_worker(task)
+            
+            time.sleep(self.sleep_time)
+```
+
+**Features**:
+- Fair task scheduling (round-robin per project)
+- Parallel worker execution
+- Redis-based worker tracking
+- Graceful shutdown handling
+</Accordion>
+
+<Accordion title="Import Worker">
+### Import Worker (`importer.py`)
+
+Executes package import:
+
+```python
+class Importer:
+    def import_package(self, task):
+        # 1. Download source
+        if task.source_type == "link":
+            srpm = download_file(task.source_url)
+        elif task.source_type == "upload":
+            srpm = fetch_uploaded_file(task)
+        
+        # 2. Extract and validate
+        spec_file = extract_spec(srpm)
+        pkg_name = get_package_name(spec_file)
+        
+        # 3. Initialize git repo
+        repo_path = self.init_git_repo(pkg_name)
+        
+        # 4. Import SRPM
+        cmd = rpkg.Commands(repo_path)
+        cmd.import_srpm(srpm)
+        
+        # 5. Upload sources to lookaside
+        cmd.upload()
+        
+        # 6. Commit
+        cmd.commit("Import {}".format(pkg_name))
+        
+        # 7. Update CGit cache
+        self.update_cgit_cache()
+        
+        return success
+```
+</Accordion>
+
+<Accordion title="Package Import Logic">
+### Source Types
+
+**SRPM URL**:
+```python
+# Direct download from URL
+srpm = download_file("https://example.com/package.src.rpm")
+import_srpm(srpm)
+```
+
+**Git + Tito**:
+```python
+# Clone and build with Tito
+repo = git.clone("https://github.com/user/package")
+os.chdir(repo)
+tito_build()
+```
+
+**Git + Make**:
+```python
+# Clone and run make srpm
+repo = git.clone("https://github.com/user/package")
+os.chdir(repo)
+run(["make", "srpm"])
+```
+
+**PyPI**:
+```python
+# Download from PyPI and generate spec
+pypi_download(package_name)
+run(["pyp2spec", "-b", "3", package_name])
+```
+
+**RubyGems**:
+```python
+# Download gem and generate spec
+gem = download_gem(gem_name)
+run(["gem2rpm", gem])
+```
+</Accordion>
+
+## Configuration
+
+<Accordion title="/etc/copr/copr-dist-git.conf">
+```ini
+[dist-git]
+# Frontend connection
+frontend_base_url=http://copr-fe
+frontend_auth=SECRET_PASSWORD
+
+# Logging
+log_dir=/var/log/copr-dist-git
+per_task_log_dir=/var/lib/copr-dist-git/per-task-logs/
+
+# CGit integration
+cgit_cache_file=/var/cache/cgit/repo-configuration.rc
+cgit_cache_list_file=/var/cache/cgit/repo-subdirs.list
+cgit_cache_lock_file=/var/cache/cgit/copr-repo.lock
+
+# Redis for worker tracking
+redis_host=localhost
+redis_port=6379
+redis_db=0
+```
+</Accordion>
+
+## CGit Integration
+
+<Accordion title="Web Interface Configuration">
+Dist-git generates CGit configuration for browsing repositories:
+
+### CGit Configuration (`/etc/cgitrc`)
+
+```bash
+# Include Copr-generated repository list
+include=/var/cache/cgit/repo-configuration.rc
+
+# CGit settings
+root-title=Copr Dist Git
+root-desc=Copr Build System Source Repositories
+enable-index-links=1
+enable-log-linecount=1
+max-stats=quarter
+
+# Paths
+repo-path=/var/lib/copr-dist-git/git
+lookaside-cache=/var/lib/copr-dist-git/lookaside
+```
+
+### Auto-generated Repository List
+
+Dist-git updates `/var/cache/cgit/repo-configuration.rc` with:
+
+```bash
+repo.url=@copr/copr-dev/copr-backend
+repo.path=/var/lib/copr-dist-git/git/@copr/copr-dev/copr-backend.git
+repo.desc=Backend build orchestration system
+repo.owner=@copr
+
+repo.url=@copr/copr-dev/copr-frontend
+repo.path=/var/lib/copr-dist-git/git/@copr/copr-dev/copr-frontend.git
+repo.desc=Frontend Flask application
+repo.owner=@copr
+```
+
+This allows browsing repositories at:
+`http://copr-dist-git/cgit/@copr/copr-dev/copr-backend/`
+</Accordion>
+
+## Systemd Service
+
+<Accordion title="Service Management">
+```bash
+# Start service
+systemctl start copr-dist-git.service
+
+# Check status
+systemctl status copr-dist-git.service
+
+# View logs
+journalctl -u copr-dist-git -f
+
+# Restart
+systemctl restart copr-dist-git.service
+```
+
+### Service Configuration
+
+```ini
+[Unit]
+Description=Copr Dist Git Import Dispatcher
+After=redis.service
+Requires=redis.service
+
+[Service]
+Type=simple
+User=copr-dist-git
+ExecStart=/usr/bin/copr-dist-git-import-dispatcher
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+</Accordion>
+
+## Lookaside Cache
+
+<Accordion title="Source Storage">
+The lookaside cache stores source tarballs referenced by Git repositories:
+
+### Structure
+
+```
+/var/lib/copr-dist-git/lookaside/pkgs/
+└── @copr/
+    └── copr-dev/
+        └── copr-backend/
+            ├── copr-backend-1.0.tar.gz/
+            │   └── <hashtype>/
+            │       └── <hash>/
+            │           └── copr-backend-1.0.tar.gz
+            └── copr-backend-1.1.tar.gz/
+                └── <hashtype>/
+                    └── <hash>/
+                        └── copr-backend-1.1.tar.gz
+```
+
+### Upload Process
+
+```python
+# Calculate checksum
+hash_type = "sha512"
+checksum = calculate_hash(tarball, hash_type)
+
+# Create lookaside path
+path = os.path.join(
+    lookaside_dir,
+    owner,
+    project,
+    package,
+    filename,
+    hash_type,
+    checksum,
+)
+
+# Store file
+os.makedirs(os.path.dirname(path), exist_ok=True)
+shutil.copy(tarball, path)
+```
+
+### HTTP Access
+
+Sources are accessible via httpd at:
+```
+http://copr-dist-git/repo/pkgs/@copr/copr-dev/copr-backend/
+    copr-backend-1.0.tar.gz/sha512/<hash>/copr-backend-1.0.tar.gz
+```
+</Accordion>
+
+## Maintenance
+
+<Accordion title="Cron Jobs">
+### Monthly Cleanup (`/etc/cron.monthly/copr-dist-git`)
+
+```bash
+#!/bin/bash
+# Remove unused source tarballs from lookaside cache
+copr-distgit-remove-unused-sources
+
+# Regenerate CGit cache
+copr-dist-git-cgit-refresh
+```
+
+### Manual Operations
+
+```bash
+# Regenerate CGit repository listing
+copr-dist-git-cgit-refresh
+
+# Check import task status
+grep "task-12345" /var/lib/copr-dist-git/per-task-logs/task-12345.log
+
+# Clean up orphaned repositories
+find /var/lib/copr-dist-git/git -type d -name '*.git' -empty -delete
+```
+</Accordion>
+
+## Error Handling
+
+<Accordion title="Common Issues">
+### Import Failures
+
+**Problem**: SRPM download fails
+```
+Error downloading https://example.com/package.src.rpm: 404 Not Found
+```
+**Solution**: Frontend notified of failure, task marked as failed
+
+**Problem**: Spec file not found in SRPM
+```
+PackageImportException: No .spec file found in SRPM
+```
+**Solution**: Ensure SRPM contains valid spec file
+
+**Problem**: Git repository already exists
+```
+GitException: Repository already initialized
+```
+**Solution**: Reuse existing repository, update with new sources
+
+### Worker Issues
+
+**Problem**: Worker hangs indefinitely
+```
+Worker PID 12345 timeout exceeded
+```
+**Solution**: Worker automatically terminated, task rescheduled
+
+**Problem**: Lookaside upload fails
+```
+UploadException: Failed to upload to lookaside cache
+```
+**Solution**: Check disk space and permissions on lookaside directory
+</Accordion>
+
+## Logging
+
+<Accordion title="Log Files">
+- **Main log**: `/var/log/copr-dist-git/main.log`
+- **Per-task logs**: `/var/lib/copr-dist-git/per-task-logs/task-{id}.log`
+
+### Log Format
+
+```
+2026-02-28 15:30:45,123 INFO [importer] [task-12345] Importing package copr-backend
+2026-02-28 15:30:46,234 INFO [importer] [task-12345] Downloaded SRPM: copr-backend-1.0-1.src.rpm
+2026-02-28 15:30:47,345 INFO [importer] [task-12345] Extracted spec: copr-backend.spec
+2026-02-28 15:30:48,456 INFO [importer] [task-12345] Initialized git repo
+2026-02-28 15:30:49,567 INFO [importer] [task-12345] Uploaded sources to lookaside
+2026-02-28 15:30:50,678 INFO [importer] [task-12345] Import completed successfully
+```
+</Accordion>
+
+## Dependencies
+
+### Core Packages
+- `python3-copr-common` - Shared Copr utilities
+- `python3-rpkg` - RPM packaging tools
+- `python3-requests` - HTTP client
+- `python3-munch` - Dictionary utilities
+- `python3-redis` - Redis client
+- `python3-daemon` - Daemonization
+- `dist-git` - Base dist-git functionality
+
+### External Tools
+- `git` - Version control
+- `httpd` - Web server
+- `cgit` - Git web interface
+- `mock` - Build system (for some import methods)
+- `tito` - RPM building from Git
+
+## See Also
+
+- [Frontend Component](/development/frontend)
+- [Builder Component](/development/builder)
+- [rpkg Documentation](https://pagure.io/rpkg)
+- [CGit Documentation](https://git.zx2c4.com/cgit/)

@@ -1,0 +1,232 @@
+---
+title: Project Chroot Endpoints
+description: Configure chroot settings for Copr projects
+---
+
+## Get Project Chroot
+
+<CodeGroup>
+```bash GET /api_3/project-chroot/
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/project-chroot/?ownername=@copr&projectname=copr-dev&chrootname=fedora-40-x86_64"
+```
+</CodeGroup>
+
+Get settings for a single project chroot.
+
+### Query Parameters
+
+<ParamField query="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField query="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField query="chrootname" type="string" required>
+  Mock chroot name (e.g., "fedora-40-x86_64")
+</ParamField>
+
+### Response
+
+<ResponseField name="mock_chroot" type="string">
+  Mock chroot name
+</ResponseField>
+
+<ResponseField name="projectname" type="string">
+  Project name
+</ResponseField>
+
+<ResponseField name="ownername" type="string">
+  Project owner name
+</ResponseField>
+
+<ResponseField name="comps_name" type="string">
+  Comps XML file name (if configured)
+</ResponseField>
+
+<ResponseField name="additional_repos" type="array">
+  Additional repository URLs for this chroot
+</ResponseField>
+
+<ResponseField name="additional_packages" type="array">
+  Additional packages to install in buildroot
+</ResponseField>
+
+<ResponseField name="additional_modules" type="array">
+  Module toggles for this chroot
+</ResponseField>
+
+<ResponseField name="with_opts" type="array">
+  RPM --with options
+</ResponseField>
+
+<ResponseField name="without_opts" type="array">
+  RPM --without options
+</ResponseField>
+
+<ResponseField name="delete_after_days" type="integer">
+  Delete builds after this many days (null for never)
+</ResponseField>
+
+<ResponseField name="isolation" type="string">
+  Build isolation mode for this chroot
+</ResponseField>
+
+---
+
+## Get Build Config
+
+<CodeGroup>
+```bash GET /api_3/project-chroot/build-config
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/project-chroot/build-config?ownername=@copr&projectname=copr-dev&chrootname=fedora-40-x86_64"
+```
+</CodeGroup>
+
+Generate a build config based on project chroot settings.
+
+### Query Parameters
+
+<ParamField query="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField query="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField query="chrootname" type="string" required>
+  Mock chroot name
+</ParamField>
+
+### Response
+
+<ResponseField name="chroot" type="string">
+  Chroot name
+</ResponseField>
+
+<ResponseField name="repos" type="array">
+  Base repository URLs
+</ResponseField>
+
+<ResponseField name="additional_repos" type="array">
+  Additional repository URLs
+</ResponseField>
+
+<ResponseField name="additional_packages" type="array">
+  Additional buildroot packages
+</ResponseField>
+
+<ResponseField name="additional_modules" type="array">
+  Module toggles
+</ResponseField>
+
+<ResponseField name="enable_net" type="boolean">
+  Network access setting
+</ResponseField>
+
+<ResponseField name="with_opts" type="array">
+  RPM --with options
+</ResponseField>
+
+<ResponseField name="without_opts" type="array">
+  RPM --without options
+</ResponseField>
+
+<ResponseField name="isolation" type="string">
+  Build isolation mode
+</ResponseField>
+
+<ResponseField name="bootstrap" type="string">
+  Bootstrap container mode (if applicable)
+</ResponseField>
+
+<ResponseField name="bootstrap_image" type="string">
+  Bootstrap container image URL (if applicable)
+</ResponseField>
+
+---
+
+## Edit Project Chroot
+
+<CodeGroup>
+```bash PUT /api_3/project-chroot/edit/<ownername>/<projectname>/<chrootname>
+curl -X PUT \
+  "https://copr.fedorainfracloud.org/api_3/project-chroot/edit/myuser/my-project/fedora-40-x86_64" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "additional_repos": ["https://example.com/repo"],
+    "additional_packages": ["gcc", "make"],
+    "with_opts": ["tests"],
+    "without_opts": ["docs"]
+  }'
+```
+</CodeGroup>
+
+Edit settings for a single project chroot. Requires authentication and edit permissions.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField path="chrootname" type="string" required>
+  Mock chroot name
+</ParamField>
+
+### Request Body
+
+<ParamField body="additional_repos" type="array">
+  Additional repository URLs (space-separated string or array)
+</ParamField>
+
+<ParamField body="additional_packages" type="array">
+  Additional packages to install in buildroot (space-separated string or array)
+</ParamField>
+
+<ParamField body="additional_modules" type="array">
+  Module toggles (e.g., ["nodejs:18", "!nodejs:16"])
+</ParamField>
+
+<ParamField body="with_opts" type="array">
+  RPM --with options (space-separated string or array)
+</ParamField>
+
+<ParamField body="without_opts" type="array">
+  RPM --without options (space-separated string or array)
+</ParamField>
+
+<ParamField body="bootstrap" type="string">
+  Bootstrap container mode: "on", "off", "image", "default"
+</ParamField>
+
+<ParamField body="bootstrap_image" type="string">
+  Custom bootstrap container image URL
+</ParamField>
+
+<ParamField body="isolation" type="string">
+  Build isolation mode: "default", "simple", "nspawn"
+</ParamField>
+
+<ParamField body="upload_comps" type="file">
+  Comps XML file upload (multipart/form-data)
+</ParamField>
+
+<ParamField body="delete_comps" type="boolean">
+  Delete existing comps file
+</ParamField>
+
+### Response
+
+Returns the updated project chroot object with 200 status code.
+
+<Note>
+  To set a field to empty/default value, pass `null` or an empty string/array. Use the `copr-cli get-chroot` command to see all possible attributes.
+</Note>

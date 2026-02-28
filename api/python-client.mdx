@@ -1,0 +1,658 @@
+---
+title: Python Client
+description: Complete reference for the python-copr client library
+---
+
+## Overview
+
+The `python-copr` library provides a Python interface to interact with the Copr build service API. It allows you to programmatically manage projects, builds, packages, and other Copr resources.
+
+## Installation
+
+Install the python-copr package using pip:
+
+<CodeGroup>
+```bash pip
+pip install copr
+```
+
+```bash pip (user install)
+pip install --user copr
+```
+</CodeGroup>
+
+### Dependencies
+
+The library requires the following dependencies (installed automatically):
+
+- `filelock` - File locking support
+- `requests` - HTTP library
+- `requests-toolbelt` - Additional utilities for requests
+- `setuptools` - Python package utilities
+- `munch` - Dictionary-like object access
+
+## Quick Start
+
+### Basic Usage
+
+```python
+from copr.v3 import Client
+
+# Initialize with configuration dictionary
+config = {
+    "copr_url": "https://copr.fedorainfracloud.org",
+    "login": "your-api-login",
+    "token": "your-api-token",
+    "username": "your-username",
+}
+
+client = Client(config)
+```
+
+### Using Configuration File
+
+Alternatively, use a configuration file located at `~/.config/copr`:
+
+```ini
+[copr-cli]
+login = your-api-login
+username = your-username
+token = your-api-token
+copr_url = https://copr.fedorainfracloud.org
+```
+
+Then create the client:
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Or specify a custom config path
+client = Client.create_from_config_file("/path/to/config")
+```
+
+<Note>
+  You can obtain your API credentials from the [Copr API page](https://copr.fedoraproject.org/api) after creating an account.
+</Note>
+
+## Client Class
+
+The `Client` class is the main entry point for interacting with the Copr API.
+
+### Constructor
+
+```python
+Client(config: dict)
+```
+
+**Parameters:**
+- `config` (dict): Configuration dictionary with the following keys:
+  - `copr_url` (str): Base URL of the Copr instance
+  - `login` (str): API login from /api page
+  - `token` (str): API token from /api page
+  - `username` (str): Your Copr username
+  - `gssapi` (bool, optional): Use GSSAPI authentication
+  - `encrypted` (bool, optional): Require HTTPS (default: True)
+
+### Class Methods
+
+#### `create_from_config_file(path=None)`
+
+Create a Client instance from a configuration file.
+
+**Parameters:**
+- `path` (str, optional): Path to config file (defaults to `~/.config/copr`)
+
+**Returns:** `Client` instance
+
+**Example:**
+```python
+client = Client.create_from_config_file()
+```
+
+## Proxy Classes
+
+The Client provides access to various proxy objects for different API resources:
+
+### Available Proxies
+
+| Proxy | Attribute | Description |
+|-------|-----------|-------------|
+| `ProjectProxy` | `client.project_proxy` | Manage projects |
+| `BuildProxy` | `client.build_proxy` | Create and manage builds |
+| `PackageProxy` | `client.package_proxy` | Manage packages |
+| `MockChrootProxy` | `client.mock_chroot_proxy` | Query available chroots |
+| `ProjectChrootProxy` | `client.project_chroot_proxy` | Manage project chroots |
+| `BuildChrootProxy` | `client.build_chroot_proxy` | Query build chroot details |
+| `MonitorProxy` | `client.monitor_proxy` | Monitor builds |
+| `WebhookProxy` | `client.webhook_proxy` | Manage webhooks |
+
+## ProjectProxy
+
+Manage Copr projects (repositories).
+
+### Methods
+
+#### `get(ownername, projectname)`
+
+Retrieve a single project.
+
+**Parameters:**
+- `ownername` (str): Owner of the project
+- `projectname` (str): Name of the project
+
+**Returns:** Munch object with project details
+
+**Example:**
+```python
+project = client.project_proxy.get("@copr", "copr-dev")
+print(project.name)
+print(project.description)
+```
+
+#### `get_list(ownername=None, pagination=None)`
+
+List projects.
+
+**Parameters:**
+- `ownername` (str, optional): Filter by owner
+- `pagination` (dict, optional): Pagination parameters
+
+**Returns:** Munch object with list of projects
+
+#### `search(query, pagination=None)`
+
+Search projects by fulltext query.
+
+**Parameters:**
+- `query` (str): Search query
+- `pagination` (dict, optional): Pagination parameters
+
+**Returns:** Munch object with search results
+
+#### `add(ownername, projectname, chroots, **kwargs)`
+
+Create a new project.
+
+**Parameters:**
+- `ownername` (str): Owner of the project
+- `projectname` (str): Name for the new project
+- `chroots` (list): List of chroot names (e.g., `["fedora-39-x86_64"]`)
+- `description` (str, optional): Project description
+- `instructions` (str, optional): Installation instructions
+- `homepage` (str, optional): Project homepage URL
+- `contact` (str, optional): Contact information
+- `additional_repos` (list, optional): External repositories
+- `unlisted_on_hp` (bool, optional): Hide from homepage (default: False)
+- `enable_net` (bool, optional): Allow network access during builds
+- `auto_prune` (bool, optional): Auto-delete old builds (default: True)
+- `delete_after_days` (int, optional): Delete project after N days
+- `bootstrap` (str, optional): Bootstrap mode (`default`, `on`, `off`, `image`)
+- `isolation` (str, optional): Mock isolation (`default`, `simple`, `nspawn`)
+- `follow_fedora_branching` (bool, optional): Auto-enable new Fedora branches
+
+**Returns:** Munch object with created project
+
+**Example:**
+```python
+project = client.project_proxy.add(
+    ownername="myuser",
+    projectname="myproject",
+    chroots=["fedora-39-x86_64", "fedora-40-x86_64"],
+    description="My awesome project",
+    instructions="dnf copr enable myuser/myproject",
+)
+```
+
+#### `edit(ownername, projectname, **kwargs)`
+
+Edit an existing project.
+
+**Parameters:** Same as `add()` (all optional except ownername and projectname)
+
+**Returns:** Munch object with updated project
+
+#### `delete(ownername, projectname)`
+
+Delete a project.
+
+**Parameters:**
+- `ownername` (str): Owner of the project
+- `projectname` (str): Name of the project to delete
+
+**Returns:** Munch object with result
+
+#### `fork(ownername, projectname, dstownername, dstprojectname, confirm=False)`
+
+Fork a project to another location.
+
+**Parameters:**
+- `ownername` (str): Source project owner
+- `projectname` (str): Source project name
+- `dstownername` (str): Destination owner
+- `dstprojectname` (str): Destination project name
+- `confirm` (bool): Confirm if destination exists
+
+**Returns:** Munch object with forked project
+
+## BuildProxy
+
+Create and manage builds.
+
+### Methods
+
+#### `get(build_id)`
+
+Retrieve build details.
+
+**Parameters:**
+- `build_id` (int): Build ID
+
+**Returns:** Munch object with build details
+
+**Example:**
+```python
+build = client.build_proxy.get(12345)
+print(build.state)  # e.g., "succeeded", "running", "failed"
+print(build.projectname)
+```
+
+#### `get_list(ownername, projectname, packagename=None, status=None, pagination=None)`
+
+List builds for a project.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `packagename` (str, optional): Filter by package name
+- `status` (str, optional): Filter by status
+- `pagination` (dict, optional): Pagination parameters
+
+**Returns:** Munch object with list of builds
+
+#### `create_from_url(ownername, projectname, url, buildopts=None, project_dirname=None)`
+
+Create a build from a SRPM URL.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `url` (str): URL to SRPM file
+- `buildopts` (dict, optional): Build options (chroots, timeouts, etc.)
+- `project_dirname` (str, optional): Subdirectory in project
+
+**Returns:** Munch object with created build
+
+**Example:**
+```python
+build = client.build_proxy.create_from_url(
+    ownername="myuser",
+    projectname="myproject",
+    url="https://example.com/package-1.0-1.src.rpm",
+)
+print(f"Build ID: {build.id}")
+```
+
+#### `create_from_file(ownername, projectname, path, buildopts=None, project_dirname=None)`
+
+Create a build from a local SRPM file.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `path` (str): Path to local SRPM file
+- `buildopts` (dict, optional): Build options
+- `project_dirname` (str, optional): Subdirectory in project
+
+**Returns:** Munch object with created build
+
+**Example:**
+```python
+build = client.build_proxy.create_from_file(
+    ownername="myuser",
+    projectname="myproject",
+    path="/path/to/package-1.0-1.src.rpm",
+)
+```
+
+#### `create_from_scm(ownername, projectname, clone_url, committish="", subdirectory="", spec="", scm_type="git", source_build_method="rpkg", buildopts=None, project_dirname=None)`
+
+Create a build from a Git/SVN repository.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `clone_url` (str): Repository URL
+- `committish` (str, optional): Branch, tag, or commit hash
+- `subdirectory` (str, optional): Subdirectory containing package
+- `spec` (str, optional): Path to spec file (relative to subdirectory)
+- `scm_type` (str, optional): Version control type (`git` or `svn`)
+- `source_build_method` (str, optional): Build method (`rpkg`, `tito`, `make_srpm`)
+- `buildopts` (dict, optional): Build options
+- `project_dirname` (str, optional): Subdirectory in project
+
+**Returns:** Munch object with created build
+
+**Example:**
+```python
+build = client.build_proxy.create_from_scm(
+    ownername="myuser",
+    projectname="myproject",
+    clone_url="https://github.com/user/repo.git",
+    committish="main",
+    subdirectory="",
+    spec="package.spec",
+)
+```
+
+#### `create_from_pypi(ownername, projectname, pypi_package_name, pypi_package_version=None, python_versions=None, buildopts=None, project_dirname=None)`
+
+Create a build from a PyPI package.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `pypi_package_name` (str): PyPI package name
+- `pypi_package_version` (str, optional): Specific version (default: latest)
+- `python_versions` (list, optional): Python versions to build for (default: `[3, 2]`)
+- `buildopts` (dict, optional): Build options
+- `project_dirname` (str, optional): Subdirectory in project
+
+**Returns:** Munch object with created build
+
+#### `cancel(build_id)`
+
+Cancel a running build.
+
+**Parameters:**
+- `build_id` (int): Build ID to cancel
+
+**Returns:** Munch object with result
+
+#### `delete(build_id)`
+
+Delete a build.
+
+**Parameters:**
+- `build_id` (int): Build ID to delete
+
+**Returns:** Munch object with result
+
+## PackageProxy
+
+Manage package configurations within projects.
+
+### Methods
+
+#### `get(ownername, projectname, packagename, with_latest_build=False, with_latest_succeeded_build=False)`
+
+Get package details.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `packagename` (str): Package name
+- `with_latest_build` (bool, optional): Include latest build info
+- `with_latest_succeeded_build` (bool, optional): Include latest successful build
+
+**Returns:** Munch object with package details
+
+#### `get_list(ownername, projectname, pagination=None, with_latest_build=False, with_latest_succeeded_build=False)`
+
+List packages in a project.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `pagination` (dict, optional): Pagination parameters
+- `with_latest_build` (bool, optional): Include latest build info
+- `with_latest_succeeded_build` (bool, optional): Include latest successful build
+
+**Returns:** Munch object with list of packages
+
+#### `add(ownername, projectname, packagename, source_type, source_dict)`
+
+Add a package configuration to a project.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `packagename` (str): Package name
+- `source_type` (str): Source type (`git`, `scm`, `pypi`, `rubygems`, `custom`)
+- `source_dict` (dict): Source configuration (depends on source_type)
+
+**Returns:** Munch object with created package
+
+**Example:**
+```python
+package = client.package_proxy.add(
+    ownername="myuser",
+    projectname="myproject",
+    packagename="mypackage",
+    source_type="git",
+    source_dict={
+        "clone_url": "https://github.com/user/repo.git",
+        "committish": "main",
+        "subdirectory": "",
+        "spec": "mypackage.spec",
+    },
+)
+```
+
+#### `edit(ownername, projectname, packagename, source_type=None, source_dict=None)`
+
+Edit package configuration.
+
+**Parameters:** Same as `add()` (source parameters are optional)
+
+**Returns:** Munch object with updated package
+
+#### `build(ownername, projectname, packagename, buildopts=None, project_dirname=None)`
+
+Create a build from package configuration.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `packagename` (str): Package name
+- `buildopts` (dict, optional): Build options
+- `project_dirname` (str, optional): Subdirectory in project
+
+**Returns:** Munch object with created build
+
+#### `delete(ownername, projectname, packagename)`
+
+Delete a package from a project.
+
+**Parameters:**
+- `ownername` (str): Project owner
+- `projectname` (str): Project name
+- `packagename` (str): Package name to delete
+
+**Returns:** Munch object with result
+
+## Helper Functions
+
+### `config_from_file(path=None)`
+
+Load configuration from a file.
+
+**Parameters:**
+- `path` (str, optional): Path to config file (defaults to `~/.config/copr`)
+
+**Returns:** Dictionary with configuration
+
+**Example:**
+```python
+from copr.v3 import config_from_file
+
+config = config_from_file()
+print(config["username"])
+```
+
+### `wait(waitable, interval=30, callback=None, timeout=0)`
+
+Wait for builds to complete.
+
+**Parameters:**
+- `waitable` (Munch or list): Build object(s) to wait for
+- `interval` (int, optional): Seconds between checks (default: 30)
+- `callback` (callable, optional): Function called on each iteration
+- `timeout` (int, optional): Maximum seconds to wait (0 = unlimited)
+
+**Returns:** List of build Munch objects
+
+**Example:**
+```python
+from copr.v3 import Client, wait
+
+client = Client.create_from_config_file()
+build = client.build_proxy.create_from_url(
+    "myuser", "myproject", "https://example.com/pkg.src.rpm"
+)
+
+# Wait for build to complete
+results = wait(build)
+print(f"Build finished with state: {results[0].state}")
+```
+
+### `succeeded(builds)`
+
+Check if all builds succeeded.
+
+**Parameters:**
+- `builds` (Munch or list): Build object(s) to check
+
+**Returns:** Boolean (True if all succeeded)
+
+**Example:**
+```python
+from copr.v3 import succeeded, wait
+
+results = wait([build1, build2])
+if succeeded(results):
+    print("All builds succeeded!")
+else:
+    print("Some builds failed")
+```
+
+## Exceptions
+
+The library defines several exception classes:
+
+### Exception Hierarchy
+
+- `CoprException` - Base exception class
+  - `CoprRequestException` - API request failed
+  - `CoprNoResultException` - No result data returned
+  - `CoprTimeoutException` - Request timed out
+  - `CoprValidationException` - Invalid data sent to API
+  - `CoprConfigException` - Configuration file error
+  - `CoprAuthException` - Authentication failure
+
+### Example Error Handling
+
+```python
+from copr.v3 import Client, CoprRequestException, CoprAuthException
+
+try:
+    client = Client.create_from_config_file()
+    project = client.project_proxy.get("user", "nonexistent")
+except CoprAuthException as e:
+    print(f"Authentication failed: {e}")
+except CoprRequestException as e:
+    print(f"Request error: {e}")
+except Exception as e:
+    print(f"Unexpected error: {e}")
+```
+
+## Munch Objects
+
+API responses are returned as `Munch` objects, which allow both dictionary and attribute-style access:
+
+```python
+build = client.build_proxy.get(12345)
+
+# Dictionary-style access
+print(build["state"])
+print(build["projectname"])
+
+# Attribute-style access (more Pythonic)
+print(build.state)
+print(build.projectname)
+
+# Iterate over keys
+for key in build:
+    print(f"{key}: {build[key]}")
+```
+
+<Tip>
+  Use attribute-style access for cleaner, more readable code. Both methods work identically.
+</Tip>
+
+## Build Options
+
+Many build methods accept a `buildopts` dictionary parameter. Common options include:
+
+```python
+buildopts = {
+    "chroots": ["fedora-39-x86_64", "fedora-40-x86_64"],  # Override project chroots
+    "background": True,  # Run as background build
+    "timeout": 18000,  # Build timeout in seconds
+    "with_build_id": 12345,  # Build with specific build
+    "after_build_id": 12340,  # Start after another build
+}
+
+build = client.build_proxy.create_from_url(
+    "myuser", "myproject",
+    "https://example.com/pkg.src.rpm",
+    buildopts=buildopts,
+)
+```
+
+## Authentication Methods
+
+The library supports multiple authentication methods:
+
+### API Token (Default)
+
+Standard authentication using login and token from `~/.config/copr`:
+
+```python
+config = {
+    "copr_url": "https://copr.fedorainfracloud.org",
+    "login": "your-login",
+    "token": "your-token",
+    "username": "your-username",
+}
+client = Client(config)
+```
+
+### GSSAPI/Kerberos
+
+Use Kerberos authentication:
+
+```ini
+[copr-cli]
+copr_url = https://copr.fedorainfracloud.org
+gssapi = True
+```
+
+Or programmatically:
+
+```python
+config = {
+    "copr_url": "https://copr.fedorainfracloud.org",
+    "gssapi": True,
+}
+client = Client(config)
+```
+
+## API Reference
+
+For complete API documentation and additional details, visit:
+
+- [Copr API Documentation](https://copr.fedorainfracloud.org/api_3/)
+- [Python-Copr ReadTheDocs](http://python-copr.readthedocs.org)
+- [Copr Frontend](https://copr.fedoraproject.org/)

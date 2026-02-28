@@ -1,0 +1,318 @@
+---
+title: Building packages
+description: How to build RPM packages in Copr from various sources
+---
+
+Copr can build RPM packages from multiple source types. This guide covers the different ways to submit builds.
+
+## Quick start
+
+The fastest way to build a package is from an SRPM file:
+
+```bash
+copr-cli build my-project /path/to/package.src.rpm
+```
+
+## Build sources overview
+
+Copr supports several build source types:
+
+- **URL**: Direct links to SRPM files or spec files
+- **Upload**: Upload SRPM or spec files from your local machine
+- **SCM**: Build from Git, DistGit, or SVN repositories
+- **DistGit**: Simplified interface for Fedora/CentOS DistGit
+- **PyPI**: Build Python packages from PyPI
+- **RubyGems**: Build Ruby gems from RubyGems.org
+- **Custom**: Use a custom script to generate sources
+
+See [Build sources](/user-guide/build-sources) for detailed information on each source type.
+
+## Building from URLs
+
+Provide one or more URLs to SRPM files or spec files.
+
+```bash
+copr-cli build my-project https://example.com/package-1.0-1.fc40.src.rpm
+```
+
+You can submit multiple builds at once by separating URLs with spaces or newlines:
+
+```bash
+copr-cli build my-project \
+  https://example.com/package1.src.rpm \
+  https://example.com/package2.src.rpm
+```
+
+<Note>
+Build order is not guaranteed when submitting multiple builds at once.
+</Note>
+
+You can also provide a URL to a spec file. Copr will download the sources specified in the spec file during the build:
+
+```bash
+copr-cli build my-project https://example.com/package.spec
+```
+
+## Uploading builds
+
+Upload SRPM or spec files directly from your local machine.
+
+<Tabs>
+  <Tab title="CLI">
+    ```bash
+    copr-cli build my-project /path/to/package.src.rpm
+    ```
+  </Tab>
+  
+  <Tab title="Web UI">
+    <Steps>
+      <Step title="Navigate to project">
+        Go to your project page on the Copr web interface.
+      </Step>
+      
+      <Step title="Start new build">
+        Click "New Build" and select "Upload" as the source type.
+      </Step>
+      
+      <Step title="Upload file">
+        Click "Choose File" and select your `.src.rpm` or `.spec` file.
+      </Step>
+      
+      <Step title="Submit build">
+        Click "Build" to start the build process.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Building with packages
+
+Instead of specifying the source with each build, you can define packages with default sources and rebuild them easily.
+
+### Creating a package
+
+```bash
+copr-cli add-package-scm my-project \
+  --name mypackage \
+  --clone-url https://github.com/user/mypackage.git \
+  --webhook-rebuild on
+```
+
+### Rebuilding a package
+
+```bash
+copr-cli build-package my-project --name mypackage
+```
+
+This uses the default source configuration you defined when adding the package.
+
+### Editing package source
+
+```bash
+copr-cli edit-package-scm my-project \
+  --name mypackage \
+  --committish v2.0.0
+```
+
+## Build options
+
+### Selecting chroots
+
+By default, builds run in all enabled chroots. You can limit builds to specific chroots:
+
+```bash
+copr-cli build my-project package.src.rpm \
+  --chroot fedora-39-x86_64 \
+  --chroot fedora-40-x86_64
+```
+
+### Build timeout
+
+Set a custom timeout for your build (in seconds):
+
+```bash
+copr-cli build my-project package.src.rpm --timeout 7200
+```
+
+Default timeout is 18,000 seconds (5 hours). Maximum is 108,000 seconds (30 hours) or 180,000 seconds (50 hours) on Fedora Copr.
+
+<Note>
+If your build exceeds the timeout, you'll see the error:
+```
+!! Copr timeout => sending INT
+Copr build error: Build failed
+```
+</Note>
+
+### Enable internet access
+
+Allow internet access during the build:
+
+```bash
+copr-cli build my-project package.src.rpm --enable-net
+```
+
+### Background builds
+
+Submit lower-priority builds for mass rebuilds:
+
+```bash
+copr-cli build my-project package.src.rpm --background
+```
+
+<Note>
+Background builds are deprioritized by the scheduler, which is helpful during mass rebuilds to avoid blocking other users.
+</Note>
+
+### SSH access to builders
+
+Enable SSH access for debugging failed builds:
+
+```bash
+copr-cli build my-project package.src.rpm \
+  --ssh-public-key "$(cat ~/.ssh/id_rsa.pub)"
+```
+
+See the [SSH access blog post](https://frostyx.cz/posts/ssh-access-to-copr-builders) for details.
+
+### Bootstrap and isolation settings
+
+Override project-level settings for specific builds:
+
+```bash
+copr-cli build my-project package.src.rpm \
+  --bootstrap image \
+  --isolation nspawn
+```
+
+## Build batches
+
+Control build order by creating batches. This is useful when packages depend on each other.
+
+### Build after another build
+
+Wait for a build to complete before starting the next one:
+
+```bash
+copr-cli build my-project first.src.rpm --nowait
+# Created builds: 101010
+
+copr-cli build my-project second.src.rpm --after-build-id 101010
+```
+
+### Build with another build
+
+Build in the same batch as another build:
+
+```bash
+copr-cli build my-project first.src.rpm --nowait
+# Created builds: 101010
+
+copr-cli build my-project second.src.rpm --with-build-id 101010
+```
+
+Both builds will start at the same time and be in the same batch.
+
+<Note>
+Batches help organize complex dependency trees. The second batch won't start until the first batch completes.
+</Note>
+
+## Rebuilding existing builds
+
+Rebuild a previous build with the same settings:
+
+```bash
+copr-cli build my-project --rebuild 12345
+```
+
+Where `12345` is the build ID from a previous build.
+
+## Multiple builds
+
+You can submit multiple builds at once when using URLs:
+
+```bash
+copr-cli build my-project \
+  https://example.com/pkg1.src.rpm \
+  https://example.com/pkg2.src.rpm \
+  https://example.com/pkg3.src.rpm
+```
+
+<Warning>
+Build order is not guaranteed when submitting multiple builds simultaneously.
+</Warning>
+
+## Monitoring builds
+
+### View build status
+
+```bash
+copr-cli status my-project
+```
+
+### Get build details
+
+```bash
+copr-cli get-build 12345
+```
+
+### Watch build logs
+
+You can view build logs in the web UI by clicking on a build and selecting a chroot.
+
+## Build results
+
+After a successful build:
+
+- RPMs are added to your project repository
+- Build logs are available for each chroot
+- If Fedora Review is enabled, a `review.txt` file is generated
+- Packages are automatically signed with the Copr signing key
+
+## Build retention
+
+Copr keeps builds according to the following policies:
+
+- **Latest build**: One build per package is kept indefinitely (the highest EPOCH:NAME-VERSION-RELEASE)
+- **Old builds**: Failed builds and superseded builds are deleted after 14 days
+- **Manual repository mode**: Projects with manual repository creation are exempt from automatic deletion
+
+<Note>
+For Pulp-backed projects, retention is count-based: the 5 most recent successful builds per package are kept.
+</Note>
+
+## Example workflows
+
+### Building a simple package
+
+```bash
+# Create project
+copr-cli create test-project --chroot fedora-rawhide-x86_64
+
+# Build package
+copr-cli build test-project https://example.com/package.src.rpm
+```
+
+### Building with dependencies
+
+```bash
+# Build base library first
+copr-cli build my-project libfoo-1.0.src.rpm --nowait
+# Created builds: 12345
+
+# Build application that depends on libfoo
+copr-cli build my-project myapp-1.0.src.rpm --after-build-id 12345
+```
+
+### Mass rebuild
+
+```bash
+# Submit all builds as background jobs
+for rpm in *.src.rpm; do
+  copr-cli build my-project "$rpm" --background --nowait
+done
+```
+
+<Note>
+Consider using existing tools like [mass-prebuild](https://gitlab.com/fedora/packager-tools/mass-prebuild) or [mini-mass-rebuild](https://github.com/hroncok/mini-mass-rebuild) for large-scale rebuilds.
+</Note>

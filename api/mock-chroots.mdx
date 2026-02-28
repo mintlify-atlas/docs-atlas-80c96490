@@ -1,0 +1,83 @@
+---
+title: Mock Chroot Endpoints
+description: Get list of available mock chroots
+---
+
+## List Mock Chroots
+
+<CodeGroup>
+```bash GET /api_3/mock-chroots/list
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/mock-chroots/list"
+```
+</CodeGroup>
+
+Get list of all currently active mock chroots with additional comments.
+
+This endpoint returns available build targets (chroots) that can be used when creating or configuring Copr projects.
+
+### Response
+
+Returns a dictionary where keys are mock chroot names and values are descriptive comments (if available).
+
+<ResponseExample>
+```json
+{
+  "fedora-40-x86_64": "",
+  "fedora-40-aarch64": "",
+  "fedora-39-x86_64": "",
+  "fedora-39-aarch64": "",
+  "fedora-rawhide-x86_64": "Fedora Rawhide (development)",
+  "fedora-rawhide-aarch64": "Fedora Rawhide (development)",
+  "epel-9-x86_64": "RHEL 9 and clones",
+  "epel-9-aarch64": "RHEL 9 and clones",
+  "epel-8-x86_64": "RHEL 8 and clones",
+  "centos-stream-9-x86_64": "CentOS Stream 9",
+  "centos-stream-9-aarch64": "CentOS Stream 9"
+}
+```
+</ResponseExample>
+
+### Chroot Naming Convention
+
+Mock chroot names follow the pattern: `<distribution>-<version>-<architecture>`
+
+**Common distributions:**
+- `fedora` - Fedora Linux releases
+- `fedora-rawhide` - Fedora development version
+- `epel` - Extra Packages for Enterprise Linux (RHEL and clones)
+- `centos-stream` - CentOS Stream releases
+- `opensuse-leap` - openSUSE Leap
+- `opensuse-tumbleweed` - openSUSE Tumbleweed
+
+**Common architectures:**
+- `x86_64` - 64-bit x86 (AMD64/Intel 64)
+- `aarch64` - 64-bit ARM
+- `ppc64le` - 64-bit PowerPC Little Endian
+- `s390x` - IBM System z
+- `i386` - 32-bit x86
+
+### Usage Example
+
+<CodeGroup>
+```python Python
+import requests
+
+response = requests.get('https://copr.fedorainfracloud.org/api_3/mock-chroots/list')
+chroots = response.json()
+
+# Filter for Fedora 40 chroots
+fedora_40 = {k: v for k, v in chroots.items() if k.startswith('fedora-40-')}
+print(fedora_40)
+# {'fedora-40-x86_64': '', 'fedora-40-aarch64': ''}
+```
+
+```bash Shell
+curl -s "https://copr.fedorainfracloud.org/api_3/mock-chroots/list" | \
+  jq 'keys | .[] | select(startswith("fedora-40"))'
+```
+</CodeGroup>
+
+<Note>
+  The list of available chroots changes over time as new distributions are released and old ones reach end-of-life. Always fetch the current list rather than hardcoding chroot names.
+</Note>

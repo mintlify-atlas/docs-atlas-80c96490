@@ -1,0 +1,251 @@
+---
+title: Permission Endpoints
+description: Manage project permissions and access control
+---
+
+## Check Build Permission
+
+<CodeGroup>
+```bash GET /api_3/project/permissions/can_build_in/<who>/<ownername>/<projectname>
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/project/permissions/can_build_in/someuser/@copr/copr-dev"
+```
+</CodeGroup>
+
+Check if a user can submit builds in a specific project.
+
+### Path Parameters
+
+<ParamField path="who" type="string" required>
+  Username to check permissions for
+</ParamField>
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+### Response
+
+<ResponseField name="who" type="string">
+  Username that was checked
+</ResponseField>
+
+<ResponseField name="ownername" type="string">
+  Project owner name
+</ResponseField>
+
+<ResponseField name="projectname" type="string">
+  Project name
+</ResponseField>
+
+<ResponseField name="can_build_in" type="boolean">
+  Whether the user can submit builds in the project
+</ResponseField>
+
+---
+
+## Get Project Permissions
+
+<CodeGroup>
+```bash GET /api_3/project/permissions/get/<ownername>/<projectname>
+curl -X GET \
+  "https://copr.fedorainfracloud.org/api_3/project/permissions/get/@copr/copr-dev"
+```
+</CodeGroup>
+
+Get all permissions configured for a project. Requires authentication and edit permissions.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+### Response
+
+<ResponseField name="permissions" type="object">
+  Dictionary of permissions keyed by username
+  <Expandable title="structure">
+    <ResponseField name="username" type="object">
+      User's permission levels
+      <Expandable title="properties">
+        <ResponseField name="admin" type="string">
+          Admin permission: "nothing", "request", "approved"
+        </ResponseField>
+        <ResponseField name="builder" type="string">
+          Builder permission: "nothing", "request", "approved"
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json
+{
+  "permissions": {
+    "alice": {
+      "admin": "approved",
+      "builder": "approved"
+    },
+    "bob": {
+      "admin": "nothing",
+      "builder": "approved"
+    },
+    "charlie": {
+      "admin": "request",
+      "builder": "nothing"
+    }
+  }
+}
+```
+</ResponseExample>
+
+---
+
+## Set Project Permissions
+
+<CodeGroup>
+```bash POST /api_3/project/permissions/set/<ownername>/<projectname>
+curl -X POST \
+  "https://copr.fedorainfracloud.org/api_3/project/permissions/set/myuser/my-project" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alice": {
+      "admin": "approved",
+      "builder": "approved"
+    },
+    "bob": {
+      "builder": "approved"
+    }
+  }'
+```
+
+```bash PUT (same endpoint)
+curl -X PUT \
+  "https://copr.fedorainfracloud.org/api_3/project/permissions/set/myuser/my-project" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "charlie": {
+      "admin": "nothing",
+      "builder": "nothing"
+    }
+  }'
+```
+</CodeGroup>
+
+Set or change permissions for users on a project. Requires authentication and admin permissions.
+
+Both POST (create) and PUT (update) methods are supported.
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+### Request Body
+
+Dictionary where keys are usernames and values are permission sets.
+
+<ParamField body="username" type="object" required>
+  User's permission configuration
+  <Expandable title="properties">
+    <ParamField body="admin" type="string">
+      Admin permission level: "nothing", "request", "approved"
+    </ParamField>
+    <ParamField body="builder" type="string">
+      Builder permission level: "nothing", "request", "approved"
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Permission Levels
+
+- **nothing** - No permission
+- **request** - Permission requested but not yet approved
+- **approved** - Permission granted
+
+### Permission Types
+
+- **admin** - Can edit project settings, manage permissions, delete project
+- **builder** - Can submit builds to the project
+
+### Response
+
+<ResponseField name="updated" type="array">
+  List of usernames whose permissions were updated
+</ResponseField>
+
+<Note>
+  Email notifications are sent to users when their permissions change (if email notifications are enabled).
+</Note>
+
+---
+
+## Request Project Permissions
+
+<CodeGroup>
+```bash PUT /api_3/project/permissions/request/<ownername>/<projectname>
+curl -X PUT \
+  "https://copr.fedorainfracloud.org/api_3/project/permissions/request/@copr/copr-dev" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "admin": false,
+    "builder": true
+  }'
+```
+</CodeGroup>
+
+Request permissions (admin, builder) for a project. Requires authentication.
+
+Both POST and PUT methods are supported (PUT is preferred).
+
+### Path Parameters
+
+<ParamField path="ownername" type="string" required>
+  Project owner name
+</ParamField>
+
+<ParamField path="projectname" type="string" required>
+  Project name
+</ParamField>
+
+### Request Body
+
+<ParamField body="admin" type="boolean" required>
+  Request admin permission (true) or not (false)
+</ParamField>
+
+<ParamField body="builder" type="boolean" required>
+  Request builder permission (true) or not (false)
+</ParamField>
+
+### Response
+
+<ResponseField name="updated" type="boolean">
+  Whether the permission request resulted in changes
+</ResponseField>
+
+<Note>
+  Project administrators receive email notifications when users request permissions (if email notifications are enabled).
+</Note>
+
+### Workflow
+
+1. User requests permission using this endpoint
+2. Project admins receive notification
+3. Admins approve/deny using the Set Project Permissions endpoint
+4. User receives notification of decision

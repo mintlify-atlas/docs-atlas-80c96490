@@ -1,0 +1,409 @@
+---
+title: Installation
+description: Install copr-cli command-line tool and python-copr client library for interacting with Copr
+---
+
+# Installation
+
+Copr provides two main client tools for interacting with the build service: the command-line interface (`copr-cli`) and the Python client library (`python-copr`). Choose the tool that best fits your workflow.
+
+## copr-cli
+
+The `copr-cli` tool is a command-line interface for managing Copr projects, submitting builds, and monitoring build status.
+
+### Install on Fedora
+
+On Fedora systems, install copr-cli using DNF:
+
+```bash
+sudo dnf install copr-cli
+```
+
+### Install on RHEL/CentOS
+
+For RHEL and CentOS systems, first enable EPEL:
+
+<CodeGroup>
+```bash RHEL 9 / CentOS Stream 9
+sudo dnf install epel-release
+sudo dnf install copr-cli
+```
+
+```bash RHEL 8 / CentOS 8
+sudo dnf install epel-release
+sudo dnf install copr-cli
+```
+
+```bash RHEL 7 / CentOS 7
+sudo yum install epel-release
+sudo yum install copr-cli
+```
+</CodeGroup>
+
+### Install from PyPI
+
+You can also install copr-cli using pip:
+
+```bash
+pip install copr-cli
+```
+
+<Warning>
+Installing via pip may not include man pages and shell completions. The distribution package is recommended.
+</Warning>
+
+### Verify installation
+
+Check that copr-cli is installed correctly:
+
+```bash
+copr-cli --version
+```
+
+You should see output similar to:
+
+```
+copr-cli 2.4
+```
+
+## Configuration
+
+### Generate API token
+
+Before using copr-cli, you need to configure authentication:
+
+<Steps>
+  <Step title="Log in to Copr">
+    Visit [copr.fedorainfracloud.org](https://copr.fedorainfracloud.org) and log in with your FAS account.
+  </Step>
+
+  <Step title="Get your API token">
+    Navigate to the [API page](https://copr.fedorainfracloud.org/api/).
+  </Step>
+
+  <Step title="Save configuration">
+    Copy the generated configuration to `~/.config/copr`:
+
+    ```bash
+    mkdir -p ~/.config
+    # Copy the configuration from the API page
+    nano ~/.config/copr
+    ```
+
+    Set appropriate permissions:
+
+    ```bash
+    chmod 600 ~/.config/copr
+    ```
+  </Step>
+</Steps>
+
+Your configuration file should look like this:
+
+```ini ~/.config/copr
+[copr-cli]
+login = your-username
+username = your-username
+token = your-api-token-here
+copr_url = https://copr.fedorainfracloud.org
+```
+
+### Alternative: Use GSSAPI authentication
+
+If you have Kerberos configured, copr-cli can use GSSAPI authentication automatically without an API token:
+
+```bash
+# Get a Kerberos ticket
+kinit your-username@FEDORAPROJECT.ORG
+
+# Use copr-cli (no token needed)
+copr-cli list
+```
+
+<Info>
+GSSAPI authentication is enabled by default in copr-cli. You can disable it in your configuration file by adding `gssapi = False`.
+</Info>
+
+## python-copr
+
+The `python-copr` library provides programmatic access to Copr functionality. Use this library to integrate Copr into your Python applications and automation scripts.
+
+### Install on Fedora
+
+Install the Python 3 client library:
+
+```bash
+sudo dnf install python3-copr
+```
+
+### Install on RHEL/CentOS
+
+First enable EPEL, then install:
+
+```bash
+sudo dnf install epel-release
+sudo dnf install python3-copr
+```
+
+### Install from PyPI
+
+Install using pip:
+
+```bash
+pip install copr
+```
+
+For development installations:
+
+```bash
+git clone https://github.com/fedora-copr/copr.git
+cd copr/python
+pip install -e .
+```
+
+### Verify installation
+
+Test the installation in Python:
+
+```python
+import copr.v3
+print(copr.v3.__version__)
+```
+
+## Basic usage
+
+### copr-cli examples
+
+<CodeGroup>
+```bash List projects
+# List your projects
+copr-cli list
+
+# List someone else's projects
+copr-cli list username
+```
+
+```bash Create project
+# Create a new project
+copr-cli create my-project \
+  --chroot fedora-rawhide-x86_64 \
+  --chroot fedora-39-x86_64 \
+  --description "My awesome project"
+```
+
+```bash Build package
+# Build from SRPM
+copr-cli build my-project package.src.rpm
+
+# Build from URL
+copr-cli build my-project https://example.com/package.src.rpm
+
+# Build from Git
+copr-cli build-scm my-project \
+  --clone-url https://github.com/user/repo.git \
+  --spec package.spec
+```
+
+```bash Get build status
+# Get build details
+copr-cli status 123456
+
+# Watch build progress
+copr-cli watch-build 123456
+```
+</CodeGroup>
+
+### python-copr examples
+
+Here's a basic example using the python-copr library:
+
+```python
+from copr.v3 import Client
+
+# Initialize client (uses ~/.config/copr)
+client = Client.create_from_config_file()
+
+# List projects
+projects = client.project_proxy.get_list(ownername="your-username")
+for project in projects:
+    print(f"{project.name}: {project.description}")
+
+# Get project details
+project = client.project_proxy.get(ownername="your-username", projectname="my-project")
+print(f"Project: {project.full_name}")
+print(f"Chroots: {project.chroot_repos.keys()}")
+
+# Submit a build
+build = client.build_proxy.create_from_urls(
+    ownername="your-username",
+    projectname="my-project",
+    urls=["https://example.com/package.src.rpm"]
+)
+print(f"Build ID: {build.id}")
+print(f"Build URL: https://copr.fedorainfracloud.org/coprs/build/{build.id}/")
+
+# Monitor build status
+import time
+while build.state in ["pending", "running"]:
+    time.sleep(30)
+    build = client.build_proxy.get(build.id)
+    print(f"Build state: {build.state}")
+
+print(f"Build finished: {build.state}")
+```
+
+### Building from Git with python-copr
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Build from Git repository
+build = client.build_proxy.create_from_scm(
+    ownername="your-username",
+    projectname="my-project",
+    scm_type="git",
+    clone_url="https://github.com/user/repo.git",
+    committish="main",
+    spec="package.spec",
+    scm_subdir="",
+    srpm_build_method="rpkg"
+)
+
+print(f"Build submitted: {build.id}")
+```
+
+## Shell completion
+
+Enable shell completion for copr-cli to get command and argument suggestions.
+
+### Bash
+
+Add to your `~/.bashrc`:
+
+```bash
+eval "$(register-python-argcomplete copr-cli)"
+```
+
+Then reload:
+
+```bash
+source ~/.bashrc
+```
+
+### Zsh  
+
+Add to your `~/.zshrc`:
+
+```zsh
+autoload -U bashcompinit
+bashcompinit
+eval "$(register-python-argcomplete copr-cli)"
+```
+
+<Info>
+Shell completion requires the `argcomplete` package. Install it with `pip install argcomplete` if not already available.
+</Info>
+
+## Getting help
+
+### Command-line help
+
+View available commands:
+
+```bash
+copr-cli --help
+```
+
+Get help for a specific command:
+
+```bash
+copr-cli build --help
+copr-cli create --help
+```
+
+### Man pages
+
+Read the manual page:
+
+```bash
+man copr-cli
+```
+
+### Python library documentation
+
+The python-copr library includes comprehensive documentation:
+
+- **API documentation**: [python-copr.readthedocs.org](http://python-copr.readthedocs.org/)
+- **Source code**: [github.com/fedora-copr/copr/tree/main/python](https://github.com/fedora-copr/copr/tree/main/python)
+
+You can also use Python's built-in help:
+
+```python
+import copr.v3
+help(copr.v3.Client)
+help(copr.v3.BuildProxy)
+```
+
+## Troubleshooting
+
+### Command not found
+
+If `copr-cli` command is not found after installation:
+
+1. Verify the package is installed: `rpm -q copr-cli`
+2. Check your PATH includes `/usr/bin`
+3. Try logging out and back in
+
+### Authentication failures
+
+<Warning>
+If you get "Authentication failed" errors:
+</Warning>
+
+1. Verify your `~/.config/copr` file exists and has correct permissions
+2. Check that the token hasn't expired (regenerate from web UI if needed)
+3. Ensure the file format matches the example above
+4. Try with `--debug` flag for more details: `copr-cli --debug list`
+
+### Import errors (Python)
+
+If you get `ImportError: No module named copr`:
+
+1. Verify installation: `pip list | grep copr` or `rpm -q python3-copr`
+2. Check you're using the correct Python version
+3. If using virtual environments, ensure the package is installed in the active environment
+
+### SSL certificate errors
+
+If you encounter SSL certificate verification errors:
+
+```bash
+# Temporarily disable SSL verification (not recommended for production)
+export COPR_INSECURE=1
+copr-cli list
+```
+
+Or update your system's CA certificates:
+
+```bash
+sudo dnf update ca-certificates
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Follow the quickstart guide to create your first project and build
+  </Card>
+  <Card title="API reference" icon="book" href="/api-reference">
+    Explore the full Copr API documentation
+  </Card>
+  <Card title="Build sources" icon="code">
+    Learn about different build source types and methods
+  </Card>
+  <Card title="Automation" icon="robot">
+    Set up webhooks and automated builds
+  </Card>
+</CardGroup>

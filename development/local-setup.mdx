@@ -1,0 +1,491 @@
+---
+title: Local Development Setup
+description: Set up a complete Copr development environment using Docker Compose
+---
+
+## Overview
+
+Copr supports Docker Compose to spawn the complete development stack on your local machine, including all components: frontend, backend, builders, distgit, keygen, and supporting services.
+
+## Prerequisites
+
+### Required Software
+
+- **Docker**: Container runtime
+- **Docker Compose**: Multi-container orchestration
+- **Git**: Version control
+
+### Installation
+
+**Fedora/RHEL:**
+
+```bash
+sudo dnf install docker docker-compose git
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+```
+
+Log out and back in for group membership to take effect.
+
+**Ubuntu/Debian:**
+
+```bash
+sudo apt install docker.io docker-compose git
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+```
+
+**Note**: For rootless Podman setup, see [Docker on Fedora](https://developer.fedoraproject.org/tools/docker/about.html).
+
+## Quick Start
+
+Get up and running in minutes:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/fedora-copr/copr.git
+    cd copr
+    ```
+  </Step>
+
+  <Step title="Start the Docker stack">
+    ```bash
+    docker-compose up -d
+    ```
+    
+    This command will take several minutes to complete on first run as it builds all container images and initializes services.
+  </Step>
+
+  <Step title="Initialize the database">
+    ```bash
+    docker exec -it copr_frontend_1 bash
+    [copr-fe@frontend /]$ init-database.sh
+    [copr-fe@frontend /]$ exit
+    ```
+  </Step>
+
+  <Step title="Access the Frontend">
+    Open your browser to: **http://localhost:5000**
+    
+    You should see the Copr web interface.
+  </Step>
+</Steps>
+
+## Container Architecture
+
+The Docker Compose setup includes these services:
+
+### Core Services
+
+| Service | Container Name | Description |
+|---------|---------------|-------------|
+| **frontend** | copr_frontend_1 | Web UI and API server |
+| **database** | copr_database_1 | PostgreSQL database |
+| **backend-build** | copr_backend-build_1 | Build task dispatcher |
+| **backend-action** | copr_backend-action_1 | Action task dispatcher |
+| **backend-log** | copr_backend-log_1 | Logging service |
+| **backend_httpd** | copr_backend_httpd_1 | Build results HTTP server |
+| **distgit** | copr_distgit_1 | Source caching service |
+| **distgit-httpd** | copr_distgit-httpd_1 | DistGit HTTP server |
+| **keygen-signd** | copr_keygen-signd_1 | GPG signing daemon |
+| **keygen-httpd** | copr_keygen-httpd_1 | Keygen HTTP server |
+| **builder** | copr_builder_1 | Package builder |
+| **resalloc** | copr_resalloc_1 | Resource allocation manager |
+| **resalloc-webui** | copr_resalloc-webui_1 | Resalloc web interface |
+| **redis** | copr_redis_1 | Message queue and cache |
+| **pulp** (optional) | copr_pulp_1 | Content repository management |
+
+### Port Mappings
+
+<Note>
+  Rootless podman-compose doesn't allow multiple containers in one pod to listen on the same port, so services use different host ports.
+</Note>
+
+| Host Port | Container Port | Service | URL |
+|-----------|----------------|---------|-----|
+| 5000 | 5000 | Frontend | http://localhost:5000 |
+| 5001 | 5001 | DistGit | http://localhost:5001 |
+| 5002 | 5002 | Backend Results | http://localhost:5002 |
+| 5005 | 5000 | Resalloc WebUI | http://localhost:5005 |
+| 5006 | 80 | Pulp | http://localhost:5006 |
+| 5009 | 5432 | PostgreSQL | localhost:5009 |
+
+### Persistent Volumes
+
+Docker Compose creates named volumes for persistent data:
+
+- `results` - Build results and RPM repositories
+- `copr-keygen` - GPG keys
+- `dist-git` - Cached source RPMs
+- `database` - PostgreSQL data
+- `redis` - Redis data
+- `resalloc` - Resalloc state
+- `pulp-storage` - Pulp content storage
+- `pulp-database` - Pulp database
+
+## Working with the Stack
+
+### Viewing Logs
+
+**All services:**
+
+```bash
+docker-compose logs -f
+```
+
+**Specific service:**
+
+```bash
+docker-compose logs -f frontend
+docker-compose logs -f backend-build
+```
+
+**Inside containers:**
+
+```bash
+# Frontend logs
+docker exec -it copr_frontend_1 bash
+tail -f /var/log/httpd/error_log
+
+# Backend logs
+docker exec -it copr_backend-build_1 bash
+tail -f /var/log/copr-backend/backend.log
+```
+
+### Accessing Containers
+
+Get a shell in any container:
+
+```bash
+# Frontend
+docker exec -it copr_frontend_1 bash
+
+# Backend
+docker exec -it copr_backend-build_1 bash
+
+# DistGit
+docker exec -it copr_distgit_1 bash
+
+# Builder
+docker exec -it copr_builder_1 bash
+```
+
+### Restarting Services
+
+After making code changes, restart the affected service:
+
+**Restart specific service:**
+
+```bash
+docker-compose restart frontend
+docker-compose restart backend-build
+```
+
+**Rebuild and restart:**
+
+```bash
+docker-compose up -d --build frontend
+```
+
+**Restart all services:**
+
+```bash
+docker-compose restart
+```
+
+### Stopping the Stack
+
+**Stop all containers (preserves data):**
+
+```bash
+docker-compose stop
+```
+
+**Stop and remove containers (preserves volumes):**
+
+```bash
+docker-compose down
+```
+
+**Remove everything including volumes:**
+
+```bash
+docker-compose down -v
+```
+
+<Warning>
+  Using `docker-compose down -v` will delete all data including the database, build results, and GPG keys. Only use this when you want a completely fresh start.
+</Warning>
+
+## Development Workflow
+
+### Making Code Changes
+
+The source code is mounted into containers at `/opt/copr`, so changes to your local files are immediately visible inside containers.
+
+<Steps>
+  <Step title="Edit code in your local directory">
+    ```bash
+    # Example: Edit frontend code
+    vim frontend/coprs_frontend/views/misc.py
+    ```
+  </Step>
+
+  <Step title="Restart the service">
+    ```bash
+    docker-compose restart frontend
+    ```
+  </Step>
+
+  <Step title="Test your changes">
+    Visit http://localhost:5000 or use the API/CLI to test.
+  </Step>
+
+  <Step title="Check logs for errors">
+    ```bash
+    docker-compose logs -f frontend
+    ```
+  </Step>
+</Steps>
+
+### Testing Builds
+
+**Create a test project and build:**
+
+<Steps>
+  <Step title="Access the frontend">
+    Navigate to http://localhost:5000 and log in (create an account if needed).
+  </Step>
+
+  <Step title="Create a new project">
+    Click "New Project" and configure:
+    - Project name: `test-project`
+    - Chroots: Select `fedora-rawhide-x86_64`
+  </Step>
+
+  <Step title="Submit a build">
+    Use a simple test package:
+    - Method: "Upload"
+    - Upload a source RPM or provide a URL
+    
+    Or use CLI:
+    ```bash
+    copr-cli --config ~/.config/copr-local build test-project \
+      https://download.copr.fedorainfracloud.org/results/
+    ```
+  </Step>
+
+  <Step title="Monitor build progress">
+    Watch logs to see the build flow through components:
+    ```bash
+    # Frontend creates task
+    docker-compose logs -f frontend
+    
+    # Backend picks up task
+    docker-compose logs -f backend-build
+    
+    # Builder executes build
+    docker-compose logs -f builder
+    ```
+  </Step>
+</Steps>
+
+### Database Access
+
+**Connect to PostgreSQL:**
+
+```bash
+# From host
+psql -h localhost -p 5009 -U copr-fe -d coprdb
+Password: coprpass
+
+# From frontend container
+docker exec -it copr_frontend_1 bash
+psql -U copr-fe coprdb
+```
+
+**Common queries:**
+
+```sql
+-- List all projects
+SELECT id, name, ownername FROM copr;
+
+-- List recent builds
+SELECT id, project_id, state, submitted_on FROM build
+ORDER BY submitted_on DESC LIMIT 10;
+
+-- Check build tasks
+SELECT * FROM action ORDER BY id DESC LIMIT 5;
+```
+
+### Redis Access
+
+**Connect to Redis:**
+
+```bash
+docker exec -it copr_redis_1 bash
+redis-cli
+```
+
+**Monitor backend logs queue:**
+
+```
+> KEYS *
+> LRANGE copr:backend:log 0 -1
+```
+
+## Troubleshooting
+
+### Containers won't start
+
+**Check container status:**
+
+```bash
+docker-compose ps
+```
+
+**View container logs:**
+
+```bash
+docker-compose logs <service-name>
+```
+
+**Common issues:**
+
+- **Port conflicts**: Another service using ports 5000-5009
+  - Solution: Stop conflicting services or modify `docker-compose.yaml` ports
+- **Insufficient resources**: Docker needs enough CPU/RAM
+  - Solution: Allocate more resources in Docker settings
+- **Permission errors**: SELinux or file permissions
+  - Solution: Check volume mount permissions, try `:Z` flag
+
+### Database initialization fails
+
+**Reset database:**
+
+```bash
+docker-compose down -v
+docker-compose up -d database
+# Wait for database to be ready
+docker-compose up -d frontend
+docker exec -it copr_frontend_1 init-database.sh
+```
+
+### Build tasks not processing
+
+**Check backend dispatcher:**
+
+```bash
+docker-compose logs backend-build
+docker-compose logs backend-action
+```
+
+**Verify Resalloc is running:**
+
+```bash
+docker exec -it copr_resalloc_1 bash
+resalloc-maint resource-list
+```
+
+**Check builder availability:**
+
+```bash
+docker exec -it copr_builder_1 bash
+# Verify builder is accessible
+```
+
+### Frontend shows errors
+
+**Check Apache logs:**
+
+```bash
+docker exec -it copr_frontend_1 bash
+tail -f /var/log/httpd/error_log
+```
+
+**Verify database connection:**
+
+```bash
+docker exec -it copr_frontend_1 bash
+psql -h database -U copr-fe coprdb -c "SELECT 1;"
+```
+
+### Changes not taking effect
+
+**Full rebuild:**
+
+```bash
+docker-compose down
+docker-compose build --no-cache frontend
+docker-compose up -d
+```
+
+**Clear Python cache:**
+
+```bash
+find . -type d -name __pycache__ -exec rm -rf {} +
+find . -type f -name "*.pyc" -delete
+```
+
+## Advanced Configuration
+
+### Custom Configuration Files
+
+Configuration files are in the Docker context:
+
+- `docker/frontend/files/` - Frontend configs
+- `docker/backend/files/` - Backend configs
+- `docker/distgit/files/` - DistGit configs
+
+**Modify and rebuild:**
+
+```bash
+vim docker/frontend/files/copr.conf
+docker-compose build frontend
+docker-compose up -d frontend
+```
+
+### Environment Variables
+
+Set in `docker-compose.yaml` under service `environment`:
+
+```yaml
+frontend:
+  environment:
+    - COPR_DEBUG=1
+    - REDIS_HOST=redis
+```
+
+### Running Without Privileged Mode
+
+The builder container requires `privileged: true` for mock builds. For development without actual builds:
+
+```yaml
+builder:
+  privileged: false  # Disable if not testing builds
+```
+
+## Performance Tips
+
+- **Use SSD storage** for Docker volumes
+- **Allocate sufficient RAM** (minimum 8GB recommended)
+- **Disable unnecessary services** in `docker-compose.yaml`
+- **Use BuildKit** for faster image builds:
+  ```bash
+  export DOCKER_BUILDKIT=1
+  docker-compose build
+  ```
+
+## Next Steps
+
+- Read the [architecture documentation](/development/architecture) to understand component interactions
+- Review [contributing guidelines](/development/contributing) before submitting changes
+- Explore the [API documentation](/api/overview) to integrate with Copr
+- Join the community on IRC or mailing lists for help
+
+## Additional Resources
+
+- [Copr Docker Stack Blog Post](https://frostyx.cz/posts/copr-docker-compose-without-supervisord) - Detailed setup guide
+- [Docker on Fedora](https://developer.fedoraproject.org/tools/docker/about.html) - Docker installation and usage
+- [Copr Developer Documentation](https://docs.pagure.org/copr.copr/developer_documentation.html) - Official developer docs

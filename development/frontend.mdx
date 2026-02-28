@@ -1,0 +1,341 @@
+---
+title: Frontend Component
+description: Flask-based web application providing the user interface and REST APIs for Copr
+---
+
+## Overview
+
+The **copr-frontend** is the main web interface for the Copr build system. It is a Flask-based application that provides:
+
+- Web UI for managing build projects and submissions
+- RESTful APIs (v1, v2, and v3) for programmatic access
+- User authentication via OpenID, FAS, and OIDC
+- Build monitoring and status tracking
+- Repository configuration generation
+
+<Accordion title="Key Technologies">
+- **Framework**: Flask (Python 3)
+- **Database**: PostgreSQL with SQLAlchemy ORM
+- **Caching**: Redis with Flask-Caching
+- **Search**: Whooshee for full-text search
+- **Authentication**: Flask-OpenID, OIDC (Authlib)
+- **Session**: Flask-Session with Redis backend
+</Accordion>
+
+## Directory Structure
+
+```
+frontend/
+├── coprs_frontend/          # Main application code
+│   ├── coprs/              # Core application module
+│   │   ├── __init__.py    # Flask app initialization
+│   │   ├── models.py      # Database models (Copr, Build, Package, etc.)
+│   │   ├── views/         # Route handlers and API endpoints
+│   │   ├── logic/         # Business logic layer
+│   │   ├── forms.py       # WTForms form definitions
+│   │   ├── static/        # CSS, JavaScript, images
+│   │   └── templates/     # Jinja2 HTML templates
+│   ├── alembic/           # Database migrations
+│   └── manage.py          # CLI management commands
+├── conf/                   # Configuration files
+│   ├── copr.conf          # Main configuration
+│   └── httpd/             # Apache/WSGI configuration
+└── documentation/          # API documentation
+```
+
+## Key Modules and Responsibilities
+
+<Accordion title="Core Application (coprs/)">
+### Application Initialization (`__init__.py`)
+
+Sets up the Flask application with all necessary extensions:
+
+```python
+app = flask.Flask(__name__)
+db = SQLAlchemy(app)          # Database ORM
+cache = Cache(app)             # Redis caching
+whooshee = Whooshee(app)       # Full-text search
+session = Session(app)         # Redis-backed sessions
+oidc = init_oidc_app(app)      # OIDC authentication
+```
+
+### Models (`models.py`)
+
+Defines database models:
+- **Copr**: Project/repository definition
+- **Build**: Build task representation
+- **Package**: Source package metadata
+- **CoprChroot**: Enabled build targets (fedora-39-x86_64, etc.)
+- **User**: User accounts and permissions
+- **Action**: Backend actions (createrepo, delete, etc.)
+
+### Views (`views/`)
+
+Route handlers organized by namespace:
+- `coprs_ns/`: Web UI for projects and builds
+- `apiv3_ns/`: REST API v3 endpoints
+- `admin_ns/`: Administrative interface
+- `backend_ns/`: Backend communication endpoints
+- `status_ns/`: Build queue and status pages
+
+### Logic (`logic/`)
+
+Business logic separated from view layer:
+- `coprs_logic.py`: Project operations
+- `builds_logic.py`: Build submission and management
+- `actions_logic.py`: Backend action generation
+- `packages_logic.py`: Package management
+</Accordion>
+
+<Accordion title="Database Models">
+### Key Relationships
+
+```
+User ─┬─> Copr (projects owned)
+      └─> Build (builds submitted)
+
+Copr ─┬─> Package (packages in project)
+      ├─> CoprChroot (enabled build targets)
+      ├─> Build (builds in project)
+      └─> CoprPermission (user permissions)
+
+Build ─┬─> BuildChroot (per-architecture build status)
+       └─> Package (source package)
+
+Action ─> Copr (actions to execute)
+```
+
+### Build States
+
+- `pending`: Waiting in queue
+- `starting`: Being picked up by backend
+- `importing`: Importing source package
+- `running`: Build in progress
+- `succeeded`: Build completed successfully
+- `failed`: Build failed
+- `canceled`: Build canceled by user
+- `skipped`: Build skipped (architecture exclusion)
+</Accordion>
+
+## Configuration
+
+<Accordion title="Main Configuration File">
+### `/etc/copr/copr.conf`
+
+Key configuration options:
+
+```python
+# Database connection
+SQLALCHEMY_DATABASE_URI = 'postgresql://copr:password@localhost/coprdb'
+
+# Redis for caching and sessions
+REDIS_HOST = "localhost"
+REDIS_PORT = 6379
+REDIS_DB = 0
+
+# Backend communication
+BACKEND_PASSWORD = "secret_password"
+BACKEND_BASE_URL = "http://copr-be"
+
+# Results and logs
+DESTDIR = "/var/lib/copr/public_html/results"
+
+# Authentication
+ENABLE_DISCUSSION = False
+OPENID_PROVIDER_URL = "https://id.fedoraproject.org/openid/"
+
+# Email notifications
+SMTP_SERVER = "localhost"
+SEND_EMAILS = True
+SUPPORT_EMAIL = "copr-support@example.com"
+
+# Build settings
+DEFAULT_BUILD_TIMEOUT = 18000  # 5 hours
+MIN_BUILD_TIMEOUT = 0
+MAX_BUILD_TIMEOUT = 86400      # 24 hours
+```
+</Accordion>
+
+## API Endpoints
+
+<Accordion title="APIv3 Overview">
+### Project Operations
+
+```bash
+# List projects
+GET /api_3/project/list?ownername=@copr
+
+# Get project details
+GET /api_3/project?ownername=@copr&projectname=copr-dev
+
+# Create project
+POST /api_3/project/add
+  {"ownername": "@copr", "projectname": "my-project", 
+   "chroots": ["fedora-39-x86_64"]}
+```
+
+### Build Operations
+
+```bash
+# Submit build from URL
+POST /api_3/build/create/url
+  {"ownername": "@copr", "projectname": "copr-dev",
+   "urls": ["https://example.com/package.src.rpm"]}
+
+# Get build status
+GET /api_3/build/{build_id}
+
+# Cancel build
+POST /api_3/build/cancel/{build_id}
+```
+
+### Package Operations
+
+```bash
+# List packages
+GET /api_3/package/list?ownername=@copr&projectname=copr-dev
+
+# Get package details
+GET /api_3/package?ownername=@copr&projectname=copr-dev&packagename=copr-backend
+```
+</Accordion>
+
+## Web UI Features
+
+### User Dashboard
+- Projects overview
+- Recent builds
+- Build statistics
+- Repository instructions
+
+### Project Management
+- Create/edit/delete projects
+- Configure build chroots
+- Manage external repositories
+- Set build options (timeouts, network access, etc.)
+- Package webhooks integration
+
+### Build Management
+- Submit builds from various sources:
+  - Direct SRPM URLs
+  - Git repositories (with Tito, Make, Mock SCM)
+  - PyPI packages
+  - RubyGems
+  - DistGit
+- Monitor build progress
+- View build logs (live and archived)
+- Rebuild packages
+- Delete builds
+
+### Repository Configuration
+- Generate `.repo` files
+- GPG key distribution
+- Enable/disable chroots
+- Repository metadata
+
+## Cron Jobs
+
+<Accordion title="Scheduled Tasks">
+### Hourly Jobs (`/etc/cron.hourly/copr-frontend`)
+
+```bash
+# Update build statistics
+copr-frontend update-indexes
+
+# Check for outdated chroots
+copr-frontend notify-outdated-chroots
+
+# Process Anitya (release-monitoring.org) updates
+copr-frontend check-for-anitya-version-updates
+```
+
+### Daily Jobs (`/etc/cron.daily/copr-frontend`)
+
+```bash
+# Clean up expired temporary projects
+copr-frontend clean-expired-projects
+
+# Database dump for backup
+/usr/libexec/copr_dump_db.sh
+
+# Remove old build records
+copr-frontend clean-old-builds
+```
+</Accordion>
+
+## Database Migrations
+
+<Accordion title="Using Alembic">
+Frontend uses Alembic for schema migrations:
+
+```bash
+# Create a new migration
+copr-frontend alembic revision --autogenerate -m "Add new column"
+
+# Apply migrations
+copr-frontend alembic upgrade head
+
+# Rollback
+copr-frontend alembic downgrade -1
+
+# View history
+copr-frontend alembic history
+```
+</Accordion>
+
+## Development Commands
+
+```bash
+# Start development server
+copr-frontend run
+
+# Create database schema
+copr-frontend create-db --alembic alembic.ini
+
+# Drop database (careful!)
+copr-frontend drop-db
+
+# Create admin user
+copr-frontend alter-user --admin=on username
+
+# Create chroot
+copr-frontend create-chroot fedora-39-x86_64
+```
+
+## Logging
+
+<Accordion title="Log Locations">
+- **Main log**: `/var/log/copr-frontend/frontend.log`
+- **Access log**: `/var/log/httpd/copr_access_log`
+- **Error log**: `/var/log/httpd/copr_error_log`
+
+Log rotation is configured via `/etc/logrotate.d/copr-frontend`
+</Accordion>
+
+## Dependencies
+
+### Core Python Packages
+- `python3-flask` - Web framework
+- `python3-sqlalchemy` - ORM
+- `python3-flask-sqlalchemy` - Flask-SQLAlchemy integration
+- `python3-flask-restx` - REST API with Swagger
+- `python3-wtforms` - Form handling and validation
+- `python3-flask-wtf` - Flask-WTForms integration
+- `python3-flask-whooshee` - Full-text search
+- `python3-redis` - Redis client
+- `python3-requests` - HTTP library
+- `python3-copr-common` - Shared Copr utilities
+
+### Authentication
+- `python3-authlib` - OIDC support
+- `python3-python-ldap` - LDAP authentication
+
+### Optional
+- `python3-fedmsg` - Fedora messaging (legacy)
+- `python3-copr-messaging` - Fedora messaging (modern)
+
+## See Also
+
+- [Backend Component](/development/backend)
+- [API Documentation](https://copr.fedorainfracloud.org/api_3/)
+- [Source Code](https://github.com/fedora-copr/copr/tree/main/frontend)

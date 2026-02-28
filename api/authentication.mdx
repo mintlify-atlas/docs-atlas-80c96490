@@ -1,0 +1,276 @@
+---
+title: Authentication
+description: Generate API tokens and authenticate requests to Copr API v3
+---
+
+## Authentication Methods
+
+Copr API v3 supports two authentication methods:
+
+1. **API Token** (recommended for programmatic access)
+2. **GSSAPI/Kerberos** (for Fedora infrastructure integration)
+
+## API Token Authentication
+
+### Generating Your API Token
+
+To use the Copr API, you need to generate an API token:
+
+1. Set up a FAS account at [https://accounts.fedoraproject.org](https://accounts.fedoraproject.org)
+2. Log in to Copr at [https://copr.fedorainfracloud.org](https://copr.fedorainfracloud.org)
+3. Visit [https://copr.fedorainfracloud.org/api/](https://copr.fedorainfracloud.org/api/)
+4. Copy the generated authentication token
+
+### Storing Your API Token
+
+The recommended way to store your API token is in the `~/.config/copr` configuration file:
+
+```ini
+[copr-cli]
+login = your_api_login_here
+username = your_username
+token = your_api_token_here
+copr_url = https://copr.fedorainfracloud.org
+```
+
+This file should have restrictive permissions:
+
+```bash
+chmod 600 ~/.config/copr
+```
+
+### Using API Token in Requests
+
+API tokens use HTTP Basic Authentication. The token must be Base64-encoded in the format `api_login:api_token` and included in the `Authorization` header.
+
+<CodeGroup>
+```bash curl
+# Method 1: Using curl's built-in Basic Auth
+curl -X GET \
+  --user "your_api_login:your_api_token" \
+  https://copr.fedorainfracloud.org/api_3/project/list?ownername=@copr
+
+# Method 2: Manual Authorization header
+curl -X GET \
+  -H "Authorization: Basic $(echo -n 'your_api_login:your_api_token' | base64)" \
+  https://copr.fedorainfracloud.org/api_3/project/list?ownername=@copr
+```
+
+```python Python
+import requests
+from requests.auth import HTTPBasicAuth
+
+api_login = "your_api_login"
+api_token = "your_api_token"
+
+response = requests.get(
+    "https://copr.fedorainfracloud.org/api_3/project/list",
+    params={"ownername": "@copr"},
+    auth=HTTPBasicAuth(api_login, api_token)
+)
+
+projects = response.json()
+```
+
+```python Python (copr library)
+from copr.v3 import Client
+
+# Automatically reads from ~/.config/copr
+client = Client.create_from_config_file()
+
+# Or specify credentials directly
+client = Client(
+    config={
+        "copr_url": "https://copr.fedorainfracloud.org",
+        "login": "your_api_login",
+        "token": "your_api_token",
+        "username": "your_username"
+    }
+)
+
+projects = client.project_proxy.get_list(ownername="@copr")
+```
+</CodeGroup>
+
+## Checking Authentication
+
+Verify your authentication is working:
+
+<CodeGroup>
+```bash curl
+curl -X GET \
+  --user "your_api_login:your_api_token" \
+  https://copr.fedorainfracloud.org/api_3/auth-check
+```
+
+```python Python
+import requests
+from requests.auth import HTTPBasicAuth
+
+response = requests.get(
+    "https://copr.fedorainfracloud.org/api_3/auth-check",
+    auth=HTTPBasicAuth("your_api_login", "your_api_token")
+)
+
+print(response.json())
+```
+</CodeGroup>
+
+Success response:
+
+```json
+{
+  "admin": false,
+  "id": 1234,
+  "name": "your_username",
+  "username": "your_username"
+}
+```
+
+## Regenerating API Token
+
+You can programmatically generate a new API token:
+
+<CodeGroup>
+```bash curl
+curl -X POST \
+  --user "your_current_api_login:your_current_api_token" \
+  https://copr.fedorainfracloud.org/api_3/api-token
+```
+
+```python Python
+import requests
+from requests.auth import HTTPBasicAuth
+
+response = requests.post(
+    "https://copr.fedorainfracloud.org/api_3/api-token",
+    auth=HTTPBasicAuth("your_api_login", "your_api_token")
+)
+
+new_credentials = response.json()
+print(f"New login: {new_credentials['api_login']}")
+print(f"New token: {new_credentials['api_token']}")
+```
+</CodeGroup>
+
+Response:
+
+```json
+{
+  "api_login": "new_api_login_value",
+  "api_token": "new_api_token_value"
+}
+```
+
+<Warning>
+After regenerating your token, update your `~/.config/copr` file with the new credentials. Your old token will no longer work.
+</Warning>
+
+## Token Expiration
+
+API tokens expire automatically after 6 months. When your token expires:
+
+- API requests will return a `401 Unauthorized` error
+- The error message will indicate: "Login invalid/expired. Please visit https://copr.fedorainfracloud.org/api to get or renew your API token."
+- You must log in to the web interface and generate a new token
+
+## GSSAPI/Kerberos Authentication
+
+For users with valid Kerberos credentials in the Fedora infrastructure, you can authenticate using GSSAPI:
+
+```bash
+# Obtain Kerberos ticket
+kinit your_username@FEDORAPROJECT.ORG
+
+# Use with curl (requires curl-gssapi)
+curl --negotiate -u : \
+  https://copr.fedorainfracloud.org/api_3/gssapi_login
+```
+
+This method is primarily used for internal Fedora infrastructure integration.
+
+## Authentication Errors
+
+### Invalid or Expired Token
+
+```json
+{
+  "output": "notok",
+  "error": "Login invalid/expired. Please visit https://copr.fedorainfracloud.org/api to get or renew your API token."
+}
+```
+
+**Solution**: Generate a new API token from the web interface.
+
+### Missing Authentication
+
+Attempting to access protected endpoints without authentication:
+
+```json
+{
+  "output": "notok",
+  "error": "Login invalid/expired. Please visit https://copr.fedorainfracloud.org/api to get or renew your API token."
+}
+```
+
+**Solution**: Include your API credentials in the request.
+
+### Insufficient Permissions
+
+```json
+{
+  "output": "notok",
+  "error": "User 'username' can not see permissions for project '@owner/project' (missing admin rights)"
+}
+```
+
+**Solution**: Request appropriate permissions from the project owner, or use a different account.
+
+## Security Best Practices
+
+<Note>
+**Keep your API token secure:**
+- Never commit API tokens to version control
+- Use environment variables or secure configuration files
+- Set restrictive file permissions (600) on configuration files
+- Rotate tokens periodically
+- Use separate tokens for different applications or CI/CD systems
+</Note>
+
+### Using Environment Variables
+
+```bash
+# Set environment variables
+export COPR_API_LOGIN="your_api_login"
+export COPR_API_TOKEN="your_api_token"
+
+# Use in curl
+curl -X GET \
+  --user "$COPR_API_LOGIN:$COPR_API_TOKEN" \
+  https://copr.fedorainfracloud.org/api_3/auth-check
+```
+
+```python
+import os
+import requests
+from requests.auth import HTTPBasicAuth
+
+api_login = os.environ["COPR_API_LOGIN"]
+api_token = os.environ["COPR_API_TOKEN"]
+
+response = requests.get(
+    "https://copr.fedorainfracloud.org/api_3/auth-check",
+    auth=HTTPBasicAuth(api_login, api_token)
+)
+```
+
+## Next Steps
+
+Now that you're authenticated, you can:
+
+- Create projects
+- Submit builds
+- Manage packages
+- Configure webhooks
+
+Explore the [interactive API documentation](https://copr.fedorainfracloud.org/api_3/docs/) to see all available endpoints.

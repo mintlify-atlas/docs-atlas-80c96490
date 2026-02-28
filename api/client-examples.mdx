@@ -1,0 +1,792 @@
+---
+title: Client Examples
+description: Real-world usage examples for python-copr client library
+---
+
+## Overview
+
+This page provides practical examples demonstrating common workflows with the python-copr client library.
+
+## Setup and Initialization
+
+### Basic Client Setup
+
+<CodeGroup>
+```python Config File
+from copr.v3 import Client
+
+# Load from default location (~/.config/copr)
+client = Client.create_from_config_file()
+```
+
+```python Custom Config Path
+from copr.v3 import Client
+
+# Load from custom location
+client = Client.create_from_config_file("/etc/copr/config")
+```
+
+```python Dictionary Config
+from copr.v3 import Client
+
+config = {
+    "copr_url": "https://copr.fedorainfracloud.org",
+    "login": "your-api-login",
+    "token": "your-api-token",
+    "username": "your-username",
+}
+
+client = Client(config)
+```
+</CodeGroup>
+
+### Configuration File Format
+
+Create `~/.config/copr` with your API credentials:
+
+```ini
+[copr-cli]
+login = abc123def456
+username = myusername
+token = xyz789uvw012
+copr_url = https://copr.fedorainfracloud.org
+```
+
+<Note>
+  Obtain your API credentials from [https://copr.fedoraproject.org/api](https://copr.fedoraproject.org/api) after logging in.
+</Note>
+
+## Project Management
+
+### Creating a Project
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Create a new project with multiple chroots
+project = client.project_proxy.add(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    chroots=[
+        "fedora-39-x86_64",
+        "fedora-40-x86_64",
+        "epel-9-x86_64",
+    ],
+    description="My awesome software packages",
+    instructions="dnf copr enable myusername/my-awesome-project",
+    homepage="https://github.com/myusername/myproject",
+    contact="myemail@example.com",
+    enable_net=False,  # Disable network access during builds
+    auto_prune=True,  # Automatically delete old builds
+)
+
+print(f"Project created: {project.name}")
+print(f"Full name: {project.full_name}")
+```
+
+### Getting Project Information
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Get a specific project
+project = client.project_proxy.get("@copr", "copr-dev")
+
+print(f"Project: {project.name}")
+print(f"Owner: {project.ownername}")
+print(f"Description: {project.description}")
+print(f"Chroots: {', '.join(project.chroot_repos.keys())}")
+```
+
+### Listing Projects
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# List all projects for a user
+projects = client.project_proxy.get_list(ownername="myusername")
+
+for project in projects:
+    print(f"- {project.name}: {project.description}")
+```
+
+### Searching Projects
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Search for projects containing "python"
+results = client.project_proxy.search("python")
+
+for project in results:
+    print(f"{project.full_name} - {project.description}")
+```
+
+### Editing a Project
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Update project settings
+project = client.project_proxy.edit(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    description="Updated description for my project",
+    chroots=["fedora-39-x86_64", "fedora-40-x86_64", "fedora-41-x86_64"],
+    enable_net=True,  # Now allow network access
+)
+
+print(f"Project updated: {project.name}")
+```
+
+### Forking a Project
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Fork another user's project
+forked = client.project_proxy.fork(
+    ownername="otheruser",
+    projectname="their-project",
+    dstownername="myusername",
+    dstprojectname="my-fork",
+)
+
+print(f"Forked to: {forked.full_name}")
+```
+
+### Deleting a Project
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Delete a project
+result = client.project_proxy.delete(
+    ownername="myusername",
+    projectname="old-project",
+)
+
+print("Project deleted successfully")
+```
+
+## Building Packages
+
+### Build from URL
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Submit a build from a SRPM URL
+build = client.build_proxy.create_from_url(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    url="https://example.com/packages/mypackage-1.0-1.src.rpm",
+)
+
+print(f"Build submitted: ID {build.id}")
+print(f"State: {build.state}")
+```
+
+### Build from Local File
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Upload and build a local SRPM
+build = client.build_proxy.create_from_file(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    path="/path/to/mypackage-1.0-1.src.rpm",
+)
+
+print(f"Build ID: {build.id}")
+print(f"Package: {build.source_package.name}")
+```
+
+### Build from Git Repository
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Build from a Git repository
+build = client.build_proxy.create_from_scm(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    clone_url="https://github.com/user/mypackage.git",
+    committish="v1.0.0",  # branch, tag, or commit hash
+    subdirectory="",  # subdirectory containing the spec file
+    spec="mypackage.spec",  # path to spec file
+    scm_type="git",
+    source_build_method="rpkg",  # or "tito", "make_srpm"
+)
+
+print(f"Build submitted: {build.id}")
+print(f"Clone URL: {build.source_package.url}")
+```
+
+### Build from PyPI
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Build a Python package from PyPI
+build = client.build_proxy.create_from_pypi(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    pypi_package_name="requests",
+    pypi_package_version="2.31.0",  # or None for latest
+    python_versions=[3],  # Python versions to build for
+)
+
+print(f"PyPI build created: {build.id}")
+```
+
+### Build with Custom Options
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Build with specific chroots and options
+buildopts = {
+    "chroots": ["fedora-39-x86_64"],  # Override project chroots
+    "background": False,  # Normal priority build
+    "timeout": 3600,  # 1 hour timeout
+}
+
+build = client.build_proxy.create_from_url(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    url="https://example.com/package.src.rpm",
+    buildopts=buildopts,
+)
+
+print(f"Build submitted with custom options: {build.id}")
+```
+
+### Multiple Builds from URLs
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Submit multiple SRPMs at once
+urls = [
+    "https://example.com/package1-1.0-1.src.rpm",
+    "https://example.com/package2-2.0-1.src.rpm",
+    "https://example.com/package3-3.0-1.src.rpm",
+]
+
+builds = client.build_proxy.create_from_urls(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    urls=urls,
+)
+
+for build in builds:
+    print(f"Build {build.id} submitted")
+```
+
+## Monitoring Builds
+
+### Checking Build Status
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Get build information
+build = client.build_proxy.get(12345)
+
+print(f"Build ID: {build.id}")
+print(f"State: {build.state}")  # importing, pending, running, succeeded, failed, etc.
+print(f"Project: {build.projectname}")
+print(f"Package: {build.source_package.name}")
+print(f"Submitted: {build.submitted_on}")
+```
+
+### Waiting for Build Completion
+
+<CodeGroup>
+```python Single Build
+from copr.v3 import Client, wait
+
+client = Client.create_from_config_file()
+
+build = client.build_proxy.create_from_url(
+    "myusername", "my-awesome-project",
+    "https://example.com/package.src.rpm"
+)
+
+print(f"Waiting for build {build.id}...")
+results = wait(build, interval=30)
+print(f"Build finished: {results[0].state}")
+```
+
+```python Multiple Builds
+from copr.v3 import Client, wait, succeeded
+
+client = Client.create_from_config_file()
+
+build1 = client.build_proxy.create_from_url(
+    "myusername", "myproject", "https://example.com/pkg1.src.rpm"
+)
+build2 = client.build_proxy.create_from_url(
+    "myusername", "myproject", "https://example.com/pkg2.src.rpm"
+)
+
+print("Waiting for all builds to complete...")
+results = wait([build1, build2], interval=30, timeout=3600)
+
+if succeeded(results):
+    print("All builds succeeded!")
+else:
+    for build in results:
+        print(f"Build {build.id}: {build.state}")
+```
+
+```python With Progress Callback
+from copr.v3 import Client, wait
+
+client = Client.create_from_config_file()
+
+def progress_callback(builds):
+    """Called periodically with updated build info"""
+    for build in builds:
+        print(f"Build {build.id}: {build.state}")
+
+build = client.build_proxy.create_from_url(
+    "myusername", "myproject", "https://example.com/pkg.src.rpm"
+)
+
+results = wait(build, interval=20, callback=progress_callback)
+print(f"Final state: {results[0].state}")
+```
+</CodeGroup>
+
+### Listing Builds
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Get all builds for a project
+builds = client.build_proxy.get_list(
+    ownername="myusername",
+    projectname="my-awesome-project",
+)
+
+for build in builds:
+    print(f"Build {build.id}: {build.source_package.name} - {build.state}")
+```
+
+### Filtering Builds
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Get only failed builds
+builds = client.build_proxy.get_list(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    status="failed",
+)
+
+for build in builds:
+    print(f"Failed build {build.id}: {build.source_package.name}")
+```
+
+### Canceling a Build
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Cancel a running build
+result = client.build_proxy.cancel(12345)
+print(f"Build canceled: {result.state}")
+```
+
+### Deleting Builds
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Delete a single build
+client.build_proxy.delete(12345)
+print("Build deleted")
+
+# Delete multiple builds
+build_ids = [12345, 12346, 12347]
+client.build_proxy.delete_list(build_ids)
+print(f"Deleted {len(build_ids)} builds")
+```
+
+## Package Management
+
+### Adding a Package Configuration
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Add a package with Git source
+package = client.package_proxy.add(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    packagename="mypackage",
+    source_type="git",
+    source_dict={
+        "clone_url": "https://github.com/user/mypackage.git",
+        "committish": "main",
+        "subdirectory": "",
+        "spec": "mypackage.spec",
+        "type": "rpkg",
+    },
+)
+
+print(f"Package added: {package.name}")
+```
+
+### Building from Package Configuration
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Build using stored package configuration
+build = client.package_proxy.build(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    packagename="mypackage",
+)
+
+print(f"Build created from package config: {build.id}")
+```
+
+### Listing Packages
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# List all packages in a project
+packages = client.package_proxy.get_list(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    with_latest_build=True,  # Include latest build info
+)
+
+for package in packages:
+    print(f"Package: {package.name}")
+    if hasattr(package, 'builds'):
+        print(f"  Latest build: {package.builds.latest.id}")
+```
+
+### Editing Package Configuration
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Update package source configuration
+package = client.package_proxy.edit(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    packagename="mypackage",
+    source_dict={
+        "committish": "develop",  # Change to develop branch
+    },
+)
+
+print(f"Package updated: {package.name}")
+```
+
+### Deleting a Package
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Remove package from project
+client.package_proxy.delete(
+    ownername="myusername",
+    projectname="my-awesome-project",
+    packagename="old-package",
+)
+
+print("Package deleted")
+```
+
+## Advanced Workflows
+
+### Automated Build Pipeline
+
+```python
+from copr.v3 import Client, wait, succeeded
+import sys
+
+def build_pipeline(project_owner, project_name, git_url, git_tag):
+    """Complete build pipeline with error handling"""
+    client = Client.create_from_config_file()
+    
+    try:
+        # Create build from Git
+        print(f"Starting build from {git_url}@{git_tag}")
+        build = client.build_proxy.create_from_scm(
+            ownername=project_owner,
+            projectname=project_name,
+            clone_url=git_url,
+            committish=git_tag,
+            spec="package.spec",
+        )
+        
+        print(f"Build {build.id} submitted, waiting for completion...")
+        
+        # Wait for build with progress updates
+        def progress(builds):
+            print(f"  State: {builds[0].state}")
+        
+        results = wait(build, interval=30, callback=progress, timeout=7200)
+        
+        # Check results
+        if succeeded(results):
+            print(f"✓ Build {results[0].id} succeeded!")
+            print(f"  Package: {results[0].source_package.name}")
+            return 0
+        else:
+            print(f"✗ Build {results[0].id} failed")
+            print(f"  State: {results[0].state}")
+            return 1
+            
+    except Exception as e:
+        print(f"✗ Error: {e}")
+        return 2
+
+if __name__ == "__main__":
+    exit_code = build_pipeline(
+        project_owner="myusername",
+        project_name="my-awesome-project",
+        git_url="https://github.com/user/repo.git",
+        git_tag="v1.0.0",
+    )
+    sys.exit(exit_code)
+```
+
+### Batch Build Multiple Packages
+
+```python
+from copr.v3 import Client, wait, succeeded
+
+client = Client.create_from_config_file()
+
+packages = [
+    {"name": "pkg1", "url": "https://example.com/pkg1.src.rpm"},
+    {"name": "pkg2", "url": "https://example.com/pkg2.src.rpm"},
+    {"name": "pkg3", "url": "https://example.com/pkg3.src.rpm"},
+]
+
+builds = []
+for pkg in packages:
+    print(f"Submitting {pkg['name']}...")
+    build = client.build_proxy.create_from_url(
+        ownername="myusername",
+        projectname="my-awesome-project",
+        url=pkg['url'],
+    )
+    builds.append(build)
+    print(f"  Build ID: {build.id}")
+
+print(f"\nWaiting for {len(builds)} builds to complete...")
+results = wait(builds, interval=30)
+
+print("\nResults:")
+for i, result in enumerate(results):
+    status = "✓" if result.state == "succeeded" else "✗"
+    print(f"{status} {packages[i]['name']}: {result.state}")
+
+if succeeded(results):
+    print("\nAll builds succeeded!")
+else:
+    print("\nSome builds failed")
+```
+
+### Clone and Customize Project
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Fork an existing project
+original_owner = "upstream-user"
+original_project = "upstream-project"
+
+print(f"Forking {original_owner}/{original_project}...")
+forked = client.project_proxy.fork(
+    ownername=original_owner,
+    projectname=original_project,
+    dstownername="myusername",
+    dstprojectname="my-fork",
+)
+
+print(f"Forked to {forked.full_name}")
+
+# Customize the fork
+print("Customizing fork...")
+client.project_proxy.edit(
+    ownername="myusername",
+    projectname="my-fork",
+    description="My customized fork of upstream-project",
+    enable_net=True,
+    chroots=["fedora-40-x86_64"],  # Only build for F40
+)
+
+print("Fork customized successfully")
+```
+
+### Error Handling and Retries
+
+```python
+from copr.v3 import Client, CoprRequestException, CoprAuthException
+import time
+
+def create_build_with_retry(ownername, projectname, url, max_retries=3):
+    """Create build with automatic retry on failure"""
+    client = Client.create_from_config_file()
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"Attempt {attempt + 1}/{max_retries}")
+            build = client.build_proxy.create_from_url(
+                ownername=ownername,
+                projectname=projectname,
+                url=url,
+            )
+            print(f"Build created: {build.id}")
+            return build
+            
+        except CoprAuthException as e:
+            print(f"Authentication error: {e}")
+            return None  # Don't retry auth errors
+            
+        except CoprRequestException as e:
+            print(f"Request failed: {e}")
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff
+                print(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                print("Max retries reached")
+                return None
+                
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            return None
+    
+    return None
+
+# Use the retry function
+build = create_build_with_retry(
+    "myusername",
+    "my-awesome-project",
+    "https://example.com/package.src.rpm",
+)
+
+if build:
+    print(f"Success! Build ID: {build.id}")
+else:
+    print("Failed to create build")
+```
+
+## Working with Chroots
+
+### Listing Available Chroots
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+# Get all available chroots
+chroots = client.mock_chroot_proxy.get_list()
+
+print("Available chroots:")
+for chroot in chroots:
+    print(f"  - {chroot.name}")
+```
+
+### Filtering Chroots
+
+```python
+from copr.v3 import Client
+
+client = Client.create_from_config_file()
+
+chroots = client.mock_chroot_proxy.get_list()
+
+# Filter for Fedora 39 chroots only
+fedora_39 = [c for c in chroots if "fedora-39" in c.name]
+
+print("Fedora 39 chroots:")
+for chroot in fedora_39:
+    print(f"  - {chroot.name}")
+```
+
+## Tips and Best Practices
+
+<Tip>
+  Always use `wait()` when you need to ensure builds complete before proceeding. This is essential for CI/CD pipelines.
+</Tip>
+
+<Tip>
+  Use the `succeeded()` helper function to quickly check if all builds in a batch completed successfully.
+</Tip>
+
+<Note>
+  Build IDs are unique across the entire Copr instance, not just within your project.
+</Note>
+
+<Tip>
+  When building from Git, use specific tags or commit hashes for reproducible builds instead of branch names.
+</Tip>
+
+<Note>
+  The `Munch` objects returned by API calls support both dictionary and attribute access. Use whichever style you prefer.
+</Note>
